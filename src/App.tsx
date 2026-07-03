@@ -42,7 +42,7 @@ type ParsedCsv = {
   mapping: FieldMapping
 }
 
-type FieldKey = 'name' | 'phoneNumber' | 'address' | 'notes'
+type FieldKey = 'name' | 'phoneNumber' | 'address' | 'notes' | 'latitude' | 'longitude'
 type FieldMapping = Record<FieldKey, number | null>
 
 const defaultCenter: [number, number] = [37.5009, 127.0364]
@@ -59,6 +59,8 @@ const aliases: Record<FieldKey, string[]> = {
   phoneNumber: ['연락처', '전화번호', '휴대폰', '핸드폰', '휴대전화', 'mobile', 'phone', 'tel', 'telephone'],
   address: ['주소', '방문주소', '사업장주소', '고객주소', 'address', 'addr', 'location'],
   notes: ['메모', '비고', '기타', '기타사항', '담당자메모', 'notes', 'note', 'memo', 'remark'],
+  latitude: ['위도', 'lat', 'latitude', 'y', 'goaly'],
+  longitude: ['경도', 'lng', 'lon', 'long', 'longitude', 'x', 'goalx'],
 }
 
 const sampleLists: CustomerList[] = [
@@ -146,7 +148,7 @@ function makeCustomer(
   status: Customer['status'] = 'open',
 ): Customer {
   const now = new Date().toISOString()
-  return { id, customerListId, name, phoneNumber, address, notes, latitude, longitude, region, status, createdAt: now, updatedAt: now }
+  return { id, customerListId, name, phoneNumber, address, notes, latitude, longitude, coordinateSource: 'sample', region, status, createdAt: now, updatedAt: now }
 }
 
 function makeSchedule(id: string, customerListId: string, title: string): VisitSchedule {
@@ -176,7 +178,7 @@ function normalizeHeader(value: string) {
 }
 
 function detectMapping(headers: string[]): FieldMapping {
-  const mapping: FieldMapping = { name: null, phoneNumber: null, address: null, notes: null }
+  const mapping: FieldMapping = { name: null, phoneNumber: null, address: null, notes: null, latitude: null, longitude: null }
   headers.forEach((header, index) => {
     const normalized = normalizeHeader(header)
     ;(Object.keys(aliases) as FieldKey[]).forEach((field) => {
@@ -191,6 +193,16 @@ function detectMapping(headers: string[]): FieldMapping {
 
 function cleanPhone(phoneNumber: string) {
   return phoneNumber.replace(/[^\d+]/g, '')
+}
+
+function parseCoordinate(value: string, kind: 'latitude' | 'longitude') {
+  const normalized = value.trim().replace(',', '.')
+  if (!normalized) return undefined
+  const coordinate = Number(normalized)
+  if (!Number.isFinite(coordinate)) return undefined
+  if (kind === 'latitude' && coordinate >= -90 && coordinate <= 90) return coordinate
+  if (kind === 'longitude' && coordinate >= -180 && coordinate <= 180) return coordinate
+  return undefined
 }
 
 function extractRegion(address: string) {
@@ -469,20 +481,44 @@ function App() {
   }
 
   function navigateCustomer(customer: Customer) {
-    if (!customer.latitude || !customer.longitude) {
-      const destination = customer.address || customer.name
-      window.location.href = `https://maps.apple.com/?q=${encodeURIComponent(destination)}`
+    if (!customer.address.trim() && !customer.name.trim()) {
+      showToast('길찾기에 사용할 주소가 없습니다')
       return
     }
-    openTmapRoute(customer)
+    if (hasTrustedCoordinates(customer)) {
+      openTmapRoute(customer)
+      return
+    }
+    openTmapSearch(customer)
+  }
+
+  function hasTrustedCoordinates(customer: Customer) {
+    return Boolean(
+      customer.latitude &&
+      customer.longitude &&
+      (customer.coordinateSource === 'csv' || customer.coordinateSource === 'sample'),
+    )
   }
 
   function openTmapRoute(customer: Customer) {
-    const goalName = encodeURIComponent(customer.name || customer.address)
+    const goalName = encodeURIComponent(customer.address || customer.name)
     const goalX = customer.longitude
     const goalY = customer.latitude
-    const tmapUrl = `tmap://route?goalname=${goalName}&goalx=${goalX}&goaly=${goalY}&by=CAR&reqCoordType=WGS84&resCoordType=WGS84`
+    const tmapUrl = `tmap://route?goalx=${goalX}&goaly=${goalY}&goalname=${goalName}`
     const fallbackUrl = `https://maps.apple.com/?daddr=${goalY},${goalX}&q=${goalName}&dirflg=d`
+    openExternalWithFallback(tmapUrl, fallbackUrl)
+  }
+
+  function openTmapSearch(customer: Customer) {
+    const destination = customer.address.trim() || customer.name.trim()
+    const encodedDestination = encodeURIComponent(destination)
+    const tmapUrl = `tmap://?search=${encodedDestination}`
+    const fallbackUrl = `https://www.tmap.co.kr/tmap2/mobile/search.jsp?name=${encodedDestination}`
+    showToast('정확한 좌표가 없어 티맵에서 주소를 검색합니다')
+    openExternalWithFallback(tmapUrl, fallbackUrl)
+  }
+
+  function openExternalWithFallback(url: string, fallbackUrl: string) {
     let pageHidden = false
 
     const handleVisibility = () => {
@@ -492,7 +528,7 @@ function App() {
     }
 
     document.addEventListener('visibilitychange', handleVisibility, { once: true })
-    window.location.href = tmapUrl
+    window.location.href = url
     window.setTimeout(() => {
       document.removeEventListener('visibilitychange', handleVisibility)
       if (!pageHidden && document.visibilityState === 'visible') {
@@ -553,7 +589,10 @@ function App() {
         const address = getMappedValue(row, csv.mapping.address)
         const notes = getMappedValue(row, csv.mapping.notes)
         if (!name || (!phoneNumber && !address)) return null
-        const [latitude, longitude] = address ? coordinateFromAddress(address, index) : [undefined, undefined]
+        const mappedLatitude = parseCoordinate(getMappedValue(row, csv.mapping.latitude), 'latitude')
+        const mappedLongitude = parseCoordinate(getMappedValue(row, csv.mapping.longitude), 'longitude')
+        const hasCsvCoordinates = mappedLatitude !== undefined && mappedLongitude !== undefined
+        const [estimatedLatitude, estimatedLongitude] = address ? coordinateFromAddress(address, index) : [undefined, undefined]
         return {
           id: makeId('customer'),
           customerListId: listId,
@@ -561,8 +600,9 @@ function App() {
           phoneNumber,
           address,
           notes,
-          latitude,
-          longitude,
+          latitude: hasCsvCoordinates ? mappedLatitude : estimatedLatitude,
+          longitude: hasCsvCoordinates ? mappedLongitude : estimatedLongitude,
+          coordinateSource: hasCsvCoordinates ? 'csv' : address ? 'estimated' : undefined,
           region: address ? extractRegion(address) : '주소 없음',
           status: address ? 'open' : 'needsGeocode',
           createdAt: now,
@@ -1146,6 +1186,8 @@ function fieldLabel(field: FieldKey) {
     phoneNumber: '연락처',
     address: '주소',
     notes: '기타사항',
+    latitude: '위도',
+    longitude: '경도',
   }
   return labels[field]
 }
