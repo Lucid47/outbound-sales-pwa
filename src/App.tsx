@@ -40,6 +40,13 @@ type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
 }
+type GeocodeProgress = {
+  running: boolean
+  done: number
+  total: number
+  failed: number
+  current: string
+}
 
 type ParsedCsv = {
   headers: string[]
@@ -208,16 +215,6 @@ function extractRegion(address: string) {
   return '지역 미확인'
 }
 
-function coordinateFromAddress(address: string, index: number): [number, number] {
-  let hash = 0
-  for (let i = 0; i < address.length; i += 1) {
-    hash = (hash * 31 + address.charCodeAt(i)) % 10000
-  }
-  const lat = 37.49 + ((hash % 80) / 1000) + index * 0.0007
-  const lng = 126.91 + (((hash / 80) % 130) / 1000) + index * 0.0005
-  return [Number(lat.toFixed(6)), Number(lng.toFixed(6))]
-}
-
 function distanceKm(from: [number, number], to: [number, number]) {
   const radius = 6371
   const dLat = ((to[0] - from[0]) * Math.PI) / 180
@@ -244,6 +241,31 @@ function isPwaStandalone() {
 
 function isIosDevice() {
   return /iPhone|iPad|iPod/i.test(window.navigator.userAgent)
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+async function geocodeAddress(address: string) {
+  const url = new URL('https://nominatim.openstreetmap.org/search')
+  url.searchParams.set('format', 'jsonv2')
+  url.searchParams.set('q', address)
+  url.searchParams.set('countrycodes', 'kr')
+  url.searchParams.set('limit', '1')
+  url.searchParams.set('accept-language', 'ko')
+
+  const response = await fetch(url.toString(), {
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error('geocode failed')
+  const results = await response.json() as Array<{ lat: string; lon: string }>
+  const best = results[0]
+  if (!best) return null
+  const latitude = Number(best.lat)
+  const longitude = Number(best.lon)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+  return { latitude, longitude }
 }
 
 function App() {
@@ -274,6 +296,7 @@ function App() {
   const [isStandalone, setIsStandalone] = useState(() => isPwaStandalone())
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
+  const [geocodeProgress, setGeocodeProgress] = useState<GeocodeProgress>({ running: false, done: 0, total: 0, failed: 0, current: '' })
   const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
@@ -306,6 +329,8 @@ function App() {
 
   const currentCustomer = todayMode === 'schedule' ? pendingScheduleCustomers[0] : nearestCustomers[0]
   const selectedCustomer = activeCustomers.find((customer) => customer.id === selectedCustomerId) ?? currentCustomer ?? nearestCustomers[0]
+  const geocodableCustomers = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
+  const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
 
   useEffect(() => {
     async function seedAndLoadInitialData() {
@@ -321,6 +346,14 @@ function App() {
         })
       } else {
         await Promise.all(['si-1', 'si-2', 'si-3', 'si-4', 'si-5'].map((id) => appDb.visitScheduleItems.delete(id)))
+        await appDb.customers.toCollection().modify((customer) => {
+          const entry = customer as unknown as { coordinateSource?: string; latitude?: number; longitude?: number }
+          if (entry.coordinateSource === 'estimated') {
+            delete entry.latitude
+            delete entry.longitude
+            delete entry.coordinateSource
+          }
+        })
       }
       const [nextLists, nextCustomers, nextVisits, nextContacts, nextSchedules, nextScheduleItems, nextTemplates] = await Promise.all([
         appDb.customerLists.orderBy('importedAt').reverse().toArray(),
@@ -448,8 +481,13 @@ function App() {
   }
 
   function customerDistance(customer: Customer) {
-    if (!customer.latitude || !customer.longitude) return Number.MAX_SAFE_INTEGER
+    if (!hasTrustedCoordinates(customer)) return Number.MAX_SAFE_INTEGER
     return distanceKm(location, [customer.latitude, customer.longitude])
+  }
+
+  function customerDistanceLabel(customer: Customer) {
+    if (!hasTrustedCoordinates(customer)) return '거리 미확인'
+    return `약 ${customerDistance(customer).toFixed(1)}km`
   }
 
   function showToast(message: string) {
@@ -548,11 +586,11 @@ function App() {
     openTmapSearch(customer)
   }
 
-  function hasTrustedCoordinates(customer: Customer) {
+  function hasTrustedCoordinates(customer: Customer): customer is Customer & { latitude: number; longitude: number } {
     return Boolean(
-      customer.latitude &&
-      customer.longitude &&
-      (customer.coordinateSource === 'csv' || customer.coordinateSource === 'sample'),
+      typeof customer.latitude === 'number' &&
+      typeof customer.longitude === 'number' &&
+      (customer.coordinateSource === 'csv' || customer.coordinateSource === 'sample' || customer.coordinateSource === 'geocoded'),
     )
   }
 
@@ -622,7 +660,7 @@ function App() {
       updatedAt: now,
     }
     const nextCustomers = csv.rows
-      .map((row, index): Customer | null => {
+      .map((row): Customer | null => {
         const name = getMappedValue(row, csv.mapping.name)
         const phoneNumber = getMappedValue(row, csv.mapping.phoneNumber)
         const address = getMappedValue(row, csv.mapping.address)
@@ -631,7 +669,6 @@ function App() {
         const mappedLatitude = parseCoordinate(getMappedValue(row, csv.mapping.latitude), 'latitude')
         const mappedLongitude = parseCoordinate(getMappedValue(row, csv.mapping.longitude), 'longitude')
         const hasCsvCoordinates = mappedLatitude !== undefined && mappedLongitude !== undefined
-        const [estimatedLatitude, estimatedLongitude] = address ? coordinateFromAddress(address, index) : [undefined, undefined]
         return {
           id: makeId('customer'),
           customerListId: listId,
@@ -639,9 +676,9 @@ function App() {
           phoneNumber,
           address,
           notes,
-          latitude: hasCsvCoordinates ? mappedLatitude : estimatedLatitude,
-          longitude: hasCsvCoordinates ? mappedLongitude : estimatedLongitude,
-          coordinateSource: hasCsvCoordinates ? 'csv' : address ? 'estimated' : undefined,
+          latitude: hasCsvCoordinates ? mappedLatitude : undefined,
+          longitude: hasCsvCoordinates ? mappedLongitude : undefined,
+          coordinateSource: hasCsvCoordinates ? 'csv' : undefined,
           region: address ? extractRegion(address) : '주소 없음',
           status: address ? 'open' : 'needsGeocode',
           createdAt: now,
@@ -702,6 +739,46 @@ function App() {
     })
     await refresh()
     showToast(`${customer?.name ?? '고객'}을 오늘 스케줄에서 삭제했습니다`)
+  }
+
+  async function geocodeActiveList() {
+    if (geocodeProgress.running) return
+    const targets = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
+    if (!targets.length) {
+      showToast('좌표변환이 필요한 고객이 없습니다')
+      return
+    }
+
+    let failed = 0
+    setGeocodeProgress({ running: true, done: 0, total: targets.length, failed: 0, current: '' })
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const customer = targets[index]
+      setGeocodeProgress({ running: true, done: index, total: targets.length, failed, current: customer.name })
+      try {
+        const result = await geocodeAddress(customer.address)
+        if (result) {
+          const now = new Date().toISOString()
+          await appDb.customers.update(customer.id, {
+            latitude: result.latitude,
+            longitude: result.longitude,
+            coordinateSource: 'geocoded',
+            geocodedAt: now,
+            updatedAt: now,
+          })
+        } else {
+          failed += 1
+        }
+      } catch {
+        failed += 1
+      }
+      setGeocodeProgress({ running: true, done: index + 1, total: targets.length, failed, current: customer.name })
+      if (index < targets.length - 1) await wait(1100)
+    }
+
+    await refresh()
+    setGeocodeProgress({ running: false, done: targets.length, total: targets.length, failed, current: '' })
+    showToast(failed ? `좌표변환 완료: ${targets.length - failed}명 성공, ${failed}명 실패` : `${targets.length}명 좌표변환 완료`)
   }
 
   async function sortScheduleByDistance() {
@@ -1031,6 +1108,24 @@ function App() {
           <button className="secondary full" type="button" onClick={sortScheduleByDistance}>가까운 순 정렬</button>
         </section>
 
+        <section className="panel form-panel">
+          <PanelTitle title="주소 좌표변환" meta={`좌표 확보 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
+          <p className="backup-note">거리순과 지도 핀을 정확히 쓰기 위해 주소를 좌표로 변환해 저장합니다. OpenStreetMap Nominatim 정책에 맞춰 1초에 1명씩 천천히 처리합니다.</p>
+          {geocodeProgress.running && (
+            <div className="geocode-progress">
+              <div>
+                <strong>{geocodeProgress.done}/{geocodeProgress.total}</strong>
+                <span>{geocodeProgress.current ? `${geocodeProgress.current} 변환 중` : '주소 변환 중'}</span>
+              </div>
+              <progress value={geocodeProgress.done} max={geocodeProgress.total} />
+            </div>
+          )}
+          <button className="secondary full" type="button" disabled={geocodeProgress.running || geocodableCustomers.length === 0} onClick={() => void geocodeActiveList()}>
+            <Navigation size={18} />
+            {geocodeProgress.running ? '좌표변환 중' : `좌표변환 시작 (${geocodableCustomers.length}명)`}
+          </button>
+        </section>
+
         <div className="segmented">
           <button className={listFilter === 'open' ? 'active' : ''} type="button" onClick={() => setListFilter('open')}>미방문</button>
           <button className={listFilter === 'done' ? 'active' : ''} type="button" onClick={() => setListFilter('done')}>완료</button>
@@ -1166,7 +1261,7 @@ function App() {
   }
 
   function renderMap(list: Customer[]) {
-    const mapList = list.filter((customer) => customer.latitude && customer.longitude)
+    const mapList = list.filter(hasTrustedCoordinates)
     const selected = selectedCustomer ?? mapList[0]
     const path = mapList.map((customer) => [customer.latitude!, customer.longitude!] as [number, number])
     return (
@@ -1233,7 +1328,7 @@ function App() {
         <div className="chip-row">
           <span className="pill blue">{badge}</span>
           <span className="pill">{customer.region}</span>
-          <span className="pill green">약 {customerDistance(customer).toFixed(1)}km</span>
+          <span className={hasTrustedCoordinates(customer) ? 'pill green' : 'pill orange'}>{customerDistanceLabel(customer)}</span>
         </div>
         <div>
           <h2>{customer.name}</h2>
@@ -1251,7 +1346,7 @@ function App() {
       <article className="customer-row" onClick={() => setSelectedCustomerId(customer.id)}>
         <div>
           <strong>{customer.name}</strong>
-          <span>{customer.region} · 약 {customerDistance(customer).toFixed(1)}km</span>
+          <span>{customer.region} · {customerDistanceLabel(customer)}</span>
           <small>{customer.address}</small>
         </div>
         <span className={`pill ${customer.status === 'done' ? 'green' : customer.status === 'hold' ? 'orange' : 'blue'}`}>{statusLabel(customer.status)}</span>

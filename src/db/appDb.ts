@@ -23,7 +23,8 @@ export interface Customer {
   notes: string
   latitude?: number
   longitude?: number
-  coordinateSource?: 'sample' | 'csv' | 'estimated'
+  coordinateSource?: 'sample' | 'csv' | 'geocoded'
+  geocodedAt?: string
   region?: string
   status: CustomerStatus
   createdAt: string
