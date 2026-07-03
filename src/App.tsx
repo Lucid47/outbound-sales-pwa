@@ -225,10 +225,7 @@ function parseCoordinate(value: string, kind: 'latitude' | 'longitude') {
 }
 
 function extractRegion(address: string) {
-  const normalized = address
-    .replace(/[(),]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const normalized = normalizeAddressText(address)
   const parts = normalized.split(' ').filter(Boolean)
   let districtIndex = -1
   for (let index = parts.length - 1; index >= 0; index -= 1) {
@@ -243,24 +240,19 @@ function extractRegion(address: string) {
 
   const district = parts[baseIndex]
   const afterBase = parts.slice(baseIndex + 1)
-  const dong = afterBase.find((part) => /(?:동|읍|면|리)$/.test(part) && !isAddressNumber(part))
-  const road = afterBase.map(extractRoadName).find((part) => part && part !== dong)
+  const dong = afterBase.find(isAdministrativeArea)
+  const road = afterBase.map((part) => parseRoadAddressToken(part)?.road ?? '').find((part) => part && part !== dong)
   const regionParts = [district, dong, road].filter(Boolean)
   if (regionParts.length) return regionParts.join(' ')
   return '지역 미확인'
 }
 
-function extractRoadName(value: string) {
-  if (isAddressNumber(value)) return ''
-  const withoutBuildingNumber = value.replace(/\d+(?:-\d+)?(?:번지|호)?$/, '')
-  const numberedBranch = withoutBuildingNumber.match(/^(.+?(?:대로|로))\d+번길/)
-  if (numberedBranch) return numberedBranch[1]
-  const road = withoutBuildingNumber.match(/^(.+?(?:대로|로|길))/)
-  return road?.[1] ?? ''
-}
-
 function isAddressNumber(value: string) {
   return /^\d+(?:-\d+)?(?:번지|호)?$/.test(value)
+}
+
+function isAdministrativeArea(value: string) {
+  return /^(?!\d).+(?:동|읍|면|리)$/.test(value)
 }
 
 function displayRegion(customer: Pick<Customer, 'address' | 'region'>) {
@@ -268,27 +260,42 @@ function displayRegion(customer: Pick<Customer, 'address' | 'region'>) {
 }
 
 function normalizeAddressForMapSearch(address: string) {
-  const normalized = address
-    .replace(/[(),]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const normalized = normalizeAddressText(address)
   if (!normalized) return ''
 
   const parts = normalized.split(' ').filter(Boolean)
-  const roadIndex = parts.findIndex((part) => /(?:대로|로|길|번길)\d*$/.test(part) || /(?:대로|로)\d+번길$/.test(part))
+  const roadIndex = parts.findIndex((part) => Boolean(parseRoadAddressToken(part)))
   if (roadIndex === -1) return normalized
 
-  const road = parts[roadIndex]
-  const inlineNumber = road.match(/^(.+?(?:대로|로|길|번길))(\d+(?:-\d+)?)$/)
-  if (inlineNumber) {
-    return [...parts.slice(0, roadIndex), inlineNumber[1], inlineNumber[2]].join(' ')
+  const parsedRoad = parseRoadAddressToken(parts[roadIndex])
+  if (!parsedRoad) return normalized
+  if (parsedRoad.buildingNumber) {
+    return [...parts.slice(0, roadIndex), parsedRoad.road, parsedRoad.buildingNumber].join(' ')
   }
 
   const next = parts[roadIndex + 1]
   if (next && isAddressNumber(next)) {
-    return parts.slice(0, roadIndex + 2).join(' ')
+    return [...parts.slice(0, roadIndex), parsedRoad.road, next].join(' ')
   }
-  return parts.slice(0, roadIndex + 1).join(' ')
+  return [...parts.slice(0, roadIndex), parsedRoad.road].join(' ')
+}
+
+function normalizeAddressText(address: string) {
+  return address
+    .replace(/\([^)]*\)/g, ' ')
+    .split(',')[0]
+    .replace(/[，、]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseRoadAddressToken(value: string) {
+  if (isAddressNumber(value)) return null
+  const branchRoad = value.match(/^(.+(?:대로|로)\d+(?:번)?길)(\d+(?:-\d+)?)?(?:번지|호)?$/)
+  if (branchRoad) return { road: branchRoad[1], buildingNumber: branchRoad[2] ?? '' }
+  const standardRoad = value.match(/^(.+?(?:대로|로|길))(\d+(?:-\d+)?)?(?:번지|호)?$/)
+  if (standardRoad) return { road: standardRoad[1], buildingNumber: standardRoad[2] ?? '' }
+  return null
 }
 
 function uniqueNonEmpty(values: string[]) {
@@ -365,7 +372,7 @@ async function geocodeAddress(address: string) {
   const candidates = uniqueNonEmpty([normalizeAddressForMapSearch(address), address])
   for (const query of candidates) {
     const result = await fetchGeocodeResult(query)
-    if (result) return result
+    if (result) return { ...result, query }
   }
   return null
 }
@@ -443,7 +450,7 @@ function App() {
   const selectedCustomer = activeCustomers.find((customer) => customer.id === selectedCustomerId) ?? currentCustomer ?? nearestCustomers[0]
   const historyCustomer = customers.find((customer) => customer.id === historyCustomerId) ?? null
   const noteCustomer = customers.find((customer) => customer.id === noteCustomerId) ?? null
-  const geocodableCustomers = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
+  const geocodableCustomers = activeCustomers.filter(needsMapLocationRefresh)
   const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
 
@@ -743,8 +750,15 @@ function App() {
     )
   }
 
+  function needsMapLocationRefresh(customer: Customer) {
+    if (!customer.address.trim()) return false
+    if (!hasTrustedCoordinates(customer)) return true
+    if (customer.coordinateSource !== 'geocoded') return false
+    return customer.geocodeQuery !== normalizeAddressForMapSearch(customer.address)
+  }
+
   function openTmapRoute(customer: Customer) {
-    const goalName = encodeURIComponent(customer.address || customer.name)
+    const goalName = encodeURIComponent(navigationDestination(customer))
     const goalX = customer.longitude
     const goalY = customer.latitude
     const tmapUrl = `tmap://route?goalx=${goalX}&goaly=${goalY}&goalname=${goalName}`
@@ -752,11 +766,15 @@ function App() {
   }
 
   function openTmapSearch(customer: Customer) {
-    const destination = customer.address.trim() || customer.name.trim()
+    const destination = navigationDestination(customer)
     const encodedDestination = encodeURIComponent(destination)
     const tmapUrl = `tmap://?search=${encodedDestination}`
     showToast('정확한 좌표가 없어 티맵에서 주소를 검색합니다')
     openExternalApp(tmapUrl)
+  }
+
+  function navigationDestination(customer: Customer) {
+    return normalizeAddressForMapSearch(customer.address) || customer.address.trim() || customer.name.trim()
   }
 
   function openExternalApp(url: string) {
@@ -899,7 +917,7 @@ function App() {
 
   async function geocodeActiveList(options: { automatic?: boolean } = {}) {
     if (geocodeProgress.running) return
-    const targets = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
+    const targets = activeCustomers.filter(needsMapLocationRefresh)
     if (!targets.length) {
       if (!options.automatic) showToast('지도에 표시할 위치가 모두 준비되어 있습니다')
       return
@@ -921,9 +939,20 @@ function App() {
             longitude: result.longitude,
             coordinateSource: 'geocoded',
             geocodedAt: now,
+            geocodeQuery: result.query,
             updatedAt: now,
           })
         } else {
+          if (customer.coordinateSource === 'geocoded') {
+            await appDb.customers.update(customer.id, {
+              latitude: undefined,
+              longitude: undefined,
+              coordinateSource: undefined,
+              geocodedAt: undefined,
+              geocodeQuery: undefined,
+              updatedAt: new Date().toISOString(),
+            })
+          }
           failed += 1
         }
       } catch {

@@ -25,6 +25,7 @@ export interface Customer {
   longitude?: number
   coordinateSource?: 'sample' | 'csv' | 'geocoded'
   geocodedAt?: string
+  geocodeQuery?: string
   region?: string
   status: CustomerStatus
   createdAt: string
