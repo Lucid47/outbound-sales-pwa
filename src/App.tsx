@@ -225,7 +225,7 @@ function App() {
   const [tab, setTab] = useState<TabKey>('today')
   const [todayMode, setTodayMode] = useState<TodayMode>('schedule')
   const [listFilter, setListFilter] = useState<ListFilterKey>('open')
-  const [activeListId, setActiveListId] = useState<string>('')
+  const [activeListId, setActiveListId] = useState<string>(() => localStorage.getItem('activeListId') ?? '')
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [customerLists, setCustomerLists] = useState<CustomerList[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -313,10 +313,29 @@ function App() {
   }, [])
 
   useEffect(() => {
+    async function requestPersistentStorage() {
+      if ('storage' in navigator && 'persist' in navigator.storage) {
+        try {
+          await navigator.storage.persist()
+        } catch {
+          // Persistent storage is best-effort; the app still works without it.
+        }
+      }
+    }
+    void requestPersistentStorage()
+  }, [])
+
+  useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(''), 3000)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (activeListId) {
+      localStorage.setItem('activeListId', activeListId)
+    }
+  }, [activeListId])
 
   useEffect(() => {
     if (!customerLists.length || lastBackupAt) return
