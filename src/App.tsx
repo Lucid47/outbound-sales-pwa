@@ -267,6 +267,34 @@ function displayRegion(customer: Pick<Customer, 'address' | 'region'>) {
   return customer.address.trim() ? extractRegion(customer.address) : customer.region ?? '주소 없음'
 }
 
+function normalizeAddressForMapSearch(address: string) {
+  const normalized = address
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return ''
+
+  const parts = normalized.split(' ').filter(Boolean)
+  const roadIndex = parts.findIndex((part) => /(?:대로|로|길|번길)\d*$/.test(part) || /(?:대로|로)\d+번길$/.test(part))
+  if (roadIndex === -1) return normalized
+
+  const road = parts[roadIndex]
+  const inlineNumber = road.match(/^(.+?(?:대로|로|길|번길))(\d+(?:-\d+)?)$/)
+  if (inlineNumber) {
+    return [...parts.slice(0, roadIndex), inlineNumber[1], inlineNumber[2]].join(' ')
+  }
+
+  const next = parts[roadIndex + 1]
+  if (next && isAddressNumber(next)) {
+    return parts.slice(0, roadIndex + 2).join(' ')
+  }
+  return parts.slice(0, roadIndex + 1).join(' ')
+}
+
+function uniqueNonEmpty(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
 function distanceKm(from: [number, number], to: [number, number]) {
   const radius = 6371
   const dLat = ((to[0] - from[0]) * Math.PI) / 180
@@ -312,10 +340,10 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-async function geocodeAddress(address: string) {
+async function fetchGeocodeResult(query: string) {
   const url = new URL('https://nominatim.openstreetmap.org/search')
   url.searchParams.set('format', 'jsonv2')
-  url.searchParams.set('q', address)
+  url.searchParams.set('q', query)
   url.searchParams.set('countrycodes', 'kr')
   url.searchParams.set('limit', '1')
   url.searchParams.set('accept-language', 'ko')
@@ -331,6 +359,15 @@ async function geocodeAddress(address: string) {
   const longitude = Number(best.lon)
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
   return { latitude, longitude }
+}
+
+async function geocodeAddress(address: string) {
+  const candidates = uniqueNonEmpty([normalizeAddressForMapSearch(address), address])
+  for (const query of candidates) {
+    const result = await fetchGeocodeResult(query)
+    if (result) return result
+  }
+  return null
 }
 
 function App() {
