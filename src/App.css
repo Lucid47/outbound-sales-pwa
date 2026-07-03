@@ -414,6 +414,23 @@ button {
   border: 1px solid #d8dee8;
 }
 
+.map-title-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.map-title-row .panel-title {
+  margin-bottom: 12px;
+}
+
+.map-location {
+  min-width: 92px;
+  min-height: 44px;
+  padding: 0 10px;
+}
+
 .map-frame .leaflet-container {
   height: 100%;
   width: 100%;
@@ -482,6 +499,12 @@ textarea {
 
 .template-row {
   padding: 12px;
+}
+
+.backup-note {
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .empty-state {

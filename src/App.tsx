@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet'
+import { useMap } from 'react-leaflet'
 import {
   CalendarCheck,
   Check,
@@ -242,6 +243,8 @@ function App() {
   const [newTemplateTitle, setNewTemplateTitle] = useState('')
   const [newTemplateBody, setNewTemplateBody] = useState('')
   const [messageCustomerId, setMessageCustomerId] = useState<string | null>(null)
+  const [mapFocusTick, setMapFocusTick] = useState(0)
+  const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
@@ -315,6 +318,19 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
+  useEffect(() => {
+    if (!customerLists.length || lastBackupAt) return
+    showToast('아직 백업 기록이 없습니다. 설정에서 JSON 백업을 내보내세요')
+  }, [customerLists.length, lastBackupAt])
+
+  useEffect(() => {
+    if (!lastBackupAt) return
+    const daysSinceBackup = (Date.now() - new Date(lastBackupAt).getTime()) / (1000 * 60 * 60 * 24)
+    if (daysSinceBackup >= 7) {
+      showToast('마지막 백업 후 7일이 지났습니다. JSON 백업을 권장합니다')
+    }
+  }, [lastBackupAt])
+
   async function refresh() {
     const [nextLists, nextCustomers, nextVisits, nextContacts, nextSchedules, nextScheduleItems, nextTemplates] = await Promise.all([
       appDb.customerLists.orderBy('importedAt').reverse().toArray(),
@@ -352,6 +368,7 @@ function App() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocation([position.coords.latitude, position.coords.longitude])
+        setMapFocusTick((value) => value + 1)
         showToast('현재 위치를 반영했습니다')
       },
       () => showToast('위치 권한을 허용해야 가까운 순 정렬이 정확해집니다'),
@@ -626,6 +643,10 @@ function App() {
     anchor.download = `outbound-sales-backup-${todayKey()}.json`
     anchor.click()
     URL.revokeObjectURL(url)
+    const now = new Date().toISOString()
+    localStorage.setItem('lastBackupAt', now)
+    setLastBackupAt(now)
+    showToast('백업 파일을 내보냈습니다')
   }
 
   async function importBackup(file: File) {
@@ -931,7 +952,8 @@ function App() {
           <button className="primary full" type="button" onClick={addTemplate}><Plus size={18} /> 템플릿 추가</button>
         </section>
         <section className="panel form-panel">
-          <PanelTitle title="백업/복원" meta="기기 변경 대비" />
+          <PanelTitle title="백업/복원" meta={lastBackupAt ? `최근 ${formatTime(lastBackupAt)}` : '백업 없음'} />
+          <p className="backup-note">iPhone PWA는 사용자 조작 없이 파일 앱/iCloud Drive에 자동 저장하기 어렵습니다. 대신 7일 이상 백업이 없으면 앱 실행 시 알림을 띄우고, 아래 버튼으로 한 번에 JSON 백업을 저장합니다.</p>
           <button className="secondary full" type="button" onClick={exportBackup}><Download size={18} /> JSON 백업 내보내기</button>
           <button className="secondary full" type="button" onClick={() => backupInputRef.current?.click()}><Upload size={18} /> JSON 백업 가져오기</button>
           <input ref={backupInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => event.target.files?.[0] && importBackup(event.target.files[0])} />
@@ -947,9 +969,16 @@ function App() {
     return (
       <>
         <section className="panel">
-          <PanelTitle title="오늘 지도" meta="완료 고객 제외" />
+          <div className="map-title-row">
+            <PanelTitle title="오늘 지도" meta="완료 고객 제외" />
+            <button className="secondary map-location" type="button" onClick={requestLocation}>
+              <Navigation size={18} />
+              내 위치
+            </button>
+          </div>
           <div className="map-frame">
             <MapContainer center={selected?.latitude && selected?.longitude ? [selected.latitude, selected.longitude] : location} zoom={13} scrollWheelZoom={false}>
+              <MapFocus location={location} tick={mapFocusTick} />
               <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <CircleMarker center={location} radius={9} pathOptions={{ color: '#1f6feb', fillColor: '#1f6feb', fillOpacity: 0.8 }}>
                 <Popup>현재 위치</Popup>
@@ -1038,6 +1067,16 @@ function App() {
       </div>
     )
   }
+}
+
+function MapFocus({ location, tick }: { location: [number, number]; tick: number }) {
+  const map = useMap()
+  useEffect(() => {
+    if (tick > 0) {
+      map.flyTo(location, Math.max(map.getZoom(), 15), { duration: 0.7 })
+    }
+  }, [location, map, tick])
+  return null
 }
 
 function TabButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
