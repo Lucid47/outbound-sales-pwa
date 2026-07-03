@@ -280,6 +280,18 @@ button:disabled {
   gap: 8px;
 }
 
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.preset-grid button {
+  min-height: 46px;
+  justify-content: center;
+  text-align: center;
+}
+
 .action-grid > button,
 .secondary-grid > button,
 .primary,
@@ -378,6 +390,29 @@ button:disabled {
 .template-row span {
   color: #667085;
   font-size: 13px;
+}
+
+.template-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.template-actions button {
+  min-height: 42px;
+  justify-content: center;
+}
+
+.text-danger {
+  width: auto;
+  min-height: 42px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
 }
 
 .list-card {

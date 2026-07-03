@@ -151,6 +151,13 @@ const defaultTemplates: MessageTemplate[] = [
   makeTemplate('tpl-3', '재방문 문의', '안녕하세요, {고객명}님. 다시 방문 가능한 시간을 확인하고 싶어 연락드립니다.'),
 ]
 
+const notePresets = [
+  '전화하였으나 받지 않음',
+  '문자로 연락함',
+  '방문하였으나 부재',
+  '사용자 템플릿: ',
+]
+
 function makeCustomer(
   id: string,
   customerListId: string,
@@ -307,11 +314,14 @@ function App() {
   const [hasUserLocation, setHasUserLocation] = useState(false)
   const [toast, setToast] = useState('')
   const [csv, setCsv] = useState<ParsedCsv | null>(null)
-  const [importCompany, setImportCompany] = useState('고객사 C')
-  const [importListName, setImportListName] = useState('고객사 C - 7월 2차 방문 리스트')
+  const [importCompany, setImportCompany] = useState('')
+  const [importListName, setImportListName] = useState('')
   const [importSourceFile, setImportSourceFile] = useState('')
   const [newTemplateTitle, setNewTemplateTitle] = useState('')
   const [newTemplateBody, setNewTemplateBody] = useState('')
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
+  const [editingTemplateTitle, setEditingTemplateTitle] = useState('')
+  const [editingTemplateBody, setEditingTemplateBody] = useState('')
   const [messageCustomerId, setMessageCustomerId] = useState<string | null>(null)
   const [mapFocusTick, setMapFocusTick] = useState(0)
   const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
@@ -708,12 +718,16 @@ function App() {
       showToast('전화번호 또는 주소 열 중 하나는 필요합니다')
       return
     }
+    if (!importCompany.trim() || !importListName.trim()) {
+      showToast('고객사 이름과 고객리스트 이름을 입력하세요')
+      return
+    }
     const now = new Date().toISOString()
     const listId = makeId('list')
     const list: CustomerList = {
       id: listId,
-      name: importListName.trim() || '새 고객리스트',
-      companyName: importCompany.trim() || '고객사 미입력',
+      name: importListName.trim(),
+      companyName: importCompany.trim(),
       sourceFileName: importSourceFile || 'import.csv',
       importedAt: now,
       createdAt: now,
@@ -762,6 +776,9 @@ function App() {
     setActiveListId(listId)
     setTab('customers')
     setCsv(null)
+    setImportCompany('')
+    setImportListName('')
+    setImportSourceFile('')
     await refresh()
     showToast(`${nextCustomers.length}명 저장 완료`)
   }
@@ -872,6 +889,43 @@ function App() {
     setNewTemplateBody('')
     await refresh()
     showToast('문자 템플릿을 추가했습니다')
+  }
+
+  function openTemplateEditor(template: MessageTemplate) {
+    setEditingTemplateId(template.id)
+    setEditingTemplateTitle(template.title)
+    setEditingTemplateBody(template.body)
+  }
+
+  function closeTemplateEditor() {
+    setEditingTemplateId(null)
+    setEditingTemplateTitle('')
+    setEditingTemplateBody('')
+  }
+
+  async function saveTemplateEdit() {
+    if (!editingTemplateId) return
+    const title = editingTemplateTitle.trim()
+    const body = editingTemplateBody.trim()
+    if (!title || !body) {
+      showToast('템플릿 제목과 내용을 입력하세요')
+      return
+    }
+    await appDb.messageTemplates.update(editingTemplateId, {
+      title,
+      body,
+      updatedAt: new Date().toISOString(),
+    })
+    closeTemplateEditor()
+    await refresh()
+    showToast('문자 템플릿을 수정했습니다')
+  }
+
+  async function deleteTemplate(template: MessageTemplate) {
+    await appDb.messageTemplates.delete(template.id)
+    if (editingTemplateId === template.id) closeTemplateEditor()
+    await refresh()
+    showToast(`${template.title} 템플릿을 삭제했습니다`)
   }
 
   async function exportBackup() {
@@ -1033,6 +1087,13 @@ function App() {
     setNoteText('')
     await refresh()
     showToast(`${noteCustomer.name} 메모를 저장했습니다`)
+  }
+
+  function appendNotePreset(preset: string) {
+    setNoteText((current) => {
+      const trimmed = current.trim()
+      return trimmed ? `${trimmed}\n${preset}` : preset
+    })
   }
 
   function dismissInstallGuide() {
@@ -1197,6 +1258,13 @@ function App() {
             <button className="sheet-close" type="button" onClick={() => setNoteCustomerId(null)}>닫기</button>
           </div>
           <div className="form-panel">
+            <div className="preset-grid">
+              {notePresets.map((preset) => (
+                <button className="secondary" type="button" key={preset} onClick={() => appendNotePreset(preset)}>
+                  {preset.replace(': ', '')}
+                </button>
+              ))}
+            </div>
             <textarea value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder="고객 대응 내용을 입력하세요" />
             <button className="primary full" type="button" onClick={() => void saveCustomerNote()}><Save size={18} /> 메모 저장</button>
           </div>
@@ -1434,8 +1502,8 @@ function App() {
             <span>{importSourceFile || 'CSV 파일 선택'}</span>
             <input type="file" accept=".csv,text/csv" onChange={(event) => event.target.files?.[0] && handleCsvFile(event.target.files[0])} />
           </label>
-          <input value={importCompany} onChange={(event) => setImportCompany(event.target.value)} placeholder="고객사 이름" />
-          <input value={importListName} onChange={(event) => setImportListName(event.target.value)} placeholder="고객리스트 이름" />
+          <input value={importCompany} onChange={(event) => setImportCompany(event.target.value)} placeholder="고객사 이름을 입력하세요" />
+          <input value={importListName} onChange={(event) => setImportListName(event.target.value)} placeholder="예: 7월 강남 방문 리스트" />
         </section>
 
         {csv && (
@@ -1518,8 +1586,25 @@ function App() {
           <div className="list-stack">
             {templates.map((template) => (
               <article className="template-row" key={template.id}>
-                <strong>{template.title}</strong>
-                <span>{template.body}</span>
+                {editingTemplateId === template.id ? (
+                  <>
+                    <input value={editingTemplateTitle} onChange={(event) => setEditingTemplateTitle(event.target.value)} placeholder="템플릿 제목" />
+                    <textarea value={editingTemplateBody} onChange={(event) => setEditingTemplateBody(event.target.value)} placeholder="템플릿 내용" />
+                    <div className="template-actions">
+                      <button className="primary" type="button" onClick={() => void saveTemplateEdit()}><Save size={16} /> 저장</button>
+                      <button className="secondary" type="button" onClick={closeTemplateEditor}>취소</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <strong>{template.title}{template.isDefault ? ' · 기본' : ''}</strong>
+                    <span>{template.body}</span>
+                    <div className="template-actions">
+                      <button className="secondary" type="button" onClick={() => openTemplateEditor(template)}><Pencil size={16} /> 수정</button>
+                      <button className="danger-icon text-danger" type="button" onClick={() => void deleteTemplate(template)}><Trash2 size={16} /> 삭제</button>
+                    </div>
+                  </>
+                )}
               </article>
             ))}
           </div>
