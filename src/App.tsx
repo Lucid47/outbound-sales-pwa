@@ -241,6 +241,7 @@ function App() {
   const [importSourceFile, setImportSourceFile] = useState('')
   const [newTemplateTitle, setNewTemplateTitle] = useState('')
   const [newTemplateBody, setNewTemplateBody] = useState('')
+  const [messageCustomerId, setMessageCustomerId] = useState<string | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
@@ -422,8 +423,36 @@ function App() {
   }
 
   function navigateCustomer(customer: Customer) {
-    const destination = customer.address || `${customer.latitude},${customer.longitude}`
-    window.location.href = `https://maps.apple.com/?q=${encodeURIComponent(destination)}`
+    if (!customer.latitude || !customer.longitude) {
+      const destination = customer.address || customer.name
+      window.location.href = `https://maps.apple.com/?q=${encodeURIComponent(destination)}`
+      return
+    }
+    openTmapRoute(customer)
+  }
+
+  function openTmapRoute(customer: Customer) {
+    const goalName = encodeURIComponent(customer.name || customer.address)
+    const goalX = customer.longitude
+    const goalY = customer.latitude
+    const tmapUrl = `tmap://route?goalname=${goalName}&goalx=${goalX}&goaly=${goalY}&by=CAR&reqCoordType=WGS84&resCoordType=WGS84`
+    const fallbackUrl = `https://maps.apple.com/?daddr=${goalY},${goalX}&q=${goalName}&dirflg=d`
+    let pageHidden = false
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        pageHidden = true
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility, { once: true })
+    window.location.href = tmapUrl
+    window.setTimeout(() => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      if (!pageHidden && document.visibilityState === 'visible') {
+        window.location.href = fallbackUrl
+      }
+    }, 1400)
   }
 
   function fillTemplate(templateBody: string, customer: Customer) {
@@ -669,9 +698,43 @@ function App() {
         <TabButton active={tab === 'logs'} icon={<CalendarCheck size={21} />} label="기록" onClick={() => setTab('logs')} />
       </nav>
 
+      {messageCustomerId && renderMessageSheet()}
       {toast && <div className="toast">{toast}</div>}
     </main>
   )
+
+  function renderMessageSheet() {
+    const customer = customers.find((entry) => entry.id === messageCustomerId)
+    if (!customer) return null
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={() => setMessageCustomerId(null)}>
+        <section className="message-sheet" role="dialog" aria-label={`${customer.name} 문자 보내기`} onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="panel-title">
+            <div>
+              <h2>문자 보내기</h2>
+              <span>{customer.name} · {customer.phoneNumber}</span>
+            </div>
+            <button className="sheet-close" type="button" onClick={() => setMessageCustomerId(null)}>닫기</button>
+          </div>
+          <div className="message-options">
+            <button type="button" onClick={() => { setMessageCustomerId(null); void sendManualSms(customer) }}>
+              <MessageSquareText size={18} />
+              사용자 문자보내기
+              <small>본문 자동 입력 없이 문자 앱을 엽니다</small>
+            </button>
+            {templates.map((template) => (
+              <button type="button" key={template.id} onClick={() => { setMessageCustomerId(null); void sendTemplateSms(customer, template) }}>
+                <Clipboard size={18} />
+                {template.title}
+                <small>{fillTemplate(template.body, customer)}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   function renderToday() {
     const targetList = todayMode === 'schedule' ? pendingScheduleCustomers : nearestCustomers
@@ -970,17 +1033,7 @@ function App() {
     return (
       <div className="action-grid">
         <button type="button" onClick={() => callCustomer(customer)}><PhoneCall size={18} /> 전화</button>
-        <details>
-          <summary><MessageSquareText size={18} /> 문자</summary>
-          <div className="message-menu">
-            <button type="button" onClick={() => sendManualSms(customer)}>사용자 문자보내기</button>
-            {templates.map((template) => (
-              <button type="button" key={template.id} onClick={() => sendTemplateSms(customer, template)}>
-                <Clipboard size={15} /> {template.title}
-              </button>
-            ))}
-          </div>
-        </details>
+        <button type="button" onClick={() => setMessageCustomerId(customer.id)}><MessageSquareText size={18} /> 문자</button>
         <button type="button" onClick={() => navigateCustomer(customer)}><Navigation size={18} /> 길찾기</button>
       </div>
     )
