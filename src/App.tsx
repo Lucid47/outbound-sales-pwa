@@ -225,10 +225,33 @@ function parseCoordinate(value: string, kind: 'latitude' | 'longitude') {
 }
 
 function extractRegion(address: string) {
-  const parts = address.split(/\s+/).filter(Boolean)
-  if (parts.length >= 3) return `${parts[1]} ${parts[2]}`
-  if (parts.length >= 2) return parts.slice(0, 2).join(' ')
+  const normalized = address
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const parts = normalized.split(' ').filter(Boolean)
+  let districtIndex = -1
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (/(?:구|군)$/.test(parts[index])) {
+      districtIndex = index
+      break
+    }
+  }
+  const cityIndex = districtIndex === -1 ? parts.findIndex((part) => /시$/.test(part)) : -1
+  const baseIndex = districtIndex !== -1 ? districtIndex : cityIndex
+  if (baseIndex === -1) return parts.find((part) => !isAddressNumber(part)) ?? '지역 미확인'
+
+  const district = parts[baseIndex]
+  const afterBase = parts.slice(baseIndex + 1)
+  const dong = afterBase.find((part) => /(?:동|읍|면|리)$/.test(part) && !isAddressNumber(part))
+  const road = afterBase.find((part) => /(?:대로|로|길|번길)$/.test(part) && !isAddressNumber(part) && part !== dong)
+  const regionParts = [district, dong, road].filter(Boolean)
+  if (regionParts.length) return regionParts.join(' ')
   return '지역 미확인'
+}
+
+function isAddressNumber(value: string) {
+  return /^\d+(?:-\d+)?(?:번지|호)?$/.test(value)
 }
 
 function distanceKm(from: [number, number], to: [number, number]) {
@@ -397,6 +420,12 @@ function App() {
           }
         })
       }
+      await appDb.customers.toCollection().modify((customer) => {
+        const nextRegion = customer.address.trim() ? extractRegion(customer.address) : '주소 없음'
+        if (customer.region !== nextRegion) {
+          customer.region = nextRegion
+        }
+      })
       const [nextLists, nextCustomers, nextVisits, nextContacts, nextSchedules, nextScheduleItems, nextTemplates] = await Promise.all([
         appDb.customerLists.orderBy('importedAt').reverse().toArray(),
         appDb.customers.toArray(),
