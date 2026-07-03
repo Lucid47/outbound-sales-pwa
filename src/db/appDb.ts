@@ -2,7 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 
 export type CustomerStatus = 'open' | 'done' | 'hold' | 'needsGeocode'
 export type ScheduleItemStatus = 'pending' | 'completed' | 'skipped' | 'hold'
-export type ContactLogType = 'manualSms' | 'templateSms'
+export type ContactLogType = 'call' | 'manualSms' | 'templateSms' | 'note' | 'statusComplete' | 'statusReopen'
 
 export interface CustomerList {
   id: string
@@ -48,7 +48,7 @@ export interface ContactLog {
   type: ContactLogType
   templateId?: string
   messageBody?: string
-  result: 'opened' | 'sentByUser' | 'cancelled' | 'unknown'
+  result: 'opened' | 'sentByUser' | 'completed' | 'reopened' | 'saved' | 'cancelled' | 'unknown'
   createdAt: string
 }
 

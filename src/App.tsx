@@ -12,9 +12,12 @@ import {
   ListFilter,
   MessageSquareText,
   Navigation,
+  Pencil,
   PhoneCall,
   Plus,
+  RotateCcw,
   Route,
+  Save,
   Search,
   Settings,
   Trash2,
@@ -46,6 +49,12 @@ type GeocodeProgress = {
   total: number
   failed: number
   current: string
+}
+type CustomerForm = {
+  name: string
+  phoneNumber: string
+  address: string
+  notes: string
 }
 
 type ParsedCsv = {
@@ -234,6 +243,19 @@ function formatTime(value: string) {
   }).format(new Date(value))
 }
 
+function blankCustomerForm(): CustomerForm {
+  return { name: '', phoneNumber: '', address: '', notes: '' }
+}
+
+function customerToForm(customer: Customer): CustomerForm {
+  return {
+    name: customer.name,
+    phoneNumber: customer.phoneNumber,
+    address: customer.address,
+    notes: customer.notes,
+  }
+}
+
 function isPwaStandalone() {
   const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean }
   return window.matchMedia('(display-mode: standalone)').matches || Boolean(navigatorWithStandalone.standalone)
@@ -297,6 +319,11 @@ function App() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
   const [geocodeProgress, setGeocodeProgress] = useState<GeocodeProgress>({ running: false, done: 0, total: 0, failed: 0, current: '' })
+  const [editingCustomerId, setEditingCustomerId] = useState<string | 'new' | null>(null)
+  const [customerForm, setCustomerForm] = useState<CustomerForm>(() => blankCustomerForm())
+  const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null)
+  const [noteCustomerId, setNoteCustomerId] = useState<string | null>(null)
+  const [noteText, setNoteText] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
@@ -329,6 +356,8 @@ function App() {
 
   const currentCustomer = todayMode === 'schedule' ? pendingScheduleCustomers[0] : nearestCustomers[0]
   const selectedCustomer = activeCustomers.find((customer) => customer.id === selectedCustomerId) ?? currentCustomer ?? nearestCustomers[0]
+  const historyCustomer = customers.find((customer) => customer.id === historyCustomerId) ?? null
+  const noteCustomer = customers.find((customer) => customer.id === noteCustomerId) ?? null
   const geocodableCustomers = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
 
@@ -494,6 +523,19 @@ function App() {
     setToast(message)
   }
 
+  async function addTouchLog(customer: Customer, type: ContactLog['type'], result: ContactLog['result'], messageBody = '', templateId?: string) {
+    await appDb.contactLogs.add({
+      id: makeId('contact'),
+      customerListId: customer.customerListId,
+      customerId: customer.id,
+      type,
+      templateId,
+      messageBody,
+      result,
+      createdAt: new Date().toISOString(),
+    })
+  }
+
   function requestLocation() {
     if (!navigator.geolocation) {
       showToast('이 브라우저에서 위치 기능을 사용할 수 없습니다')
@@ -514,15 +556,15 @@ function App() {
   async function completeVisit(customer: Customer) {
     const now = new Date().toISOString()
     const item = activeScheduleItems.find((scheduleItem) => scheduleItem.customerId === customer.id && scheduleItem.status === 'pending')
-    await appDb.transaction('rw', appDb.customers, appDb.visitLogs, appDb.visitScheduleItems, async () => {
+    await appDb.transaction('rw', appDb.customers, appDb.contactLogs, appDb.visitScheduleItems, async () => {
       await appDb.customers.update(customer.id, { status: 'done', updatedAt: now })
-      await appDb.visitLogs.add({
-        id: makeId('visit'),
+      await appDb.contactLogs.add({
+        id: makeId('contact'),
         customerListId: customer.customerListId,
         customerId: customer.id,
-        visitedAt: now,
+        type: 'statusComplete',
+        messageBody: '고객 서비스 완료 처리',
         result: 'completed',
-        memo: '',
         createdAt: now,
       })
       if (item) {
@@ -530,19 +572,31 @@ function App() {
       }
     })
     await refresh()
-    showToast(`${customer.name} 방문완료가 저장되었습니다`)
+    showToast(`${customer.name} 완료 처리가 저장되었습니다`)
+  }
+
+  async function reopenCustomer(customer: Customer) {
+    const now = new Date().toISOString()
+    const completedItems = activeScheduleItems.filter((scheduleItem) => scheduleItem.customerId === customer.id && scheduleItem.status === 'completed')
+    await appDb.transaction('rw', appDb.customers, appDb.contactLogs, appDb.visitScheduleItems, async () => {
+      await appDb.customers.update(customer.id, { status: 'open', updatedAt: now })
+      await appDb.contactLogs.add({
+        id: makeId('contact'),
+        customerListId: customer.customerListId,
+        customerId: customer.id,
+        type: 'statusReopen',
+        messageBody: '완료 상태 취소',
+        result: 'reopened',
+        createdAt: now,
+      })
+      await Promise.all(completedItems.map((item) => appDb.visitScheduleItems.update(item.id, { status: 'pending', completedAt: undefined })))
+    })
+    await refresh()
+    showToast(`${customer.name} 고객을 다시 활성화했습니다`)
   }
 
   async function sendManualSms(customer: Customer) {
-    const now = new Date().toISOString()
-    await appDb.contactLogs.add({
-      id: makeId('contact'),
-      customerListId: customer.customerListId,
-      customerId: customer.id,
-      type: 'manualSms',
-      result: 'opened',
-      createdAt: now,
-    })
+    await addTouchLog(customer, 'manualSms', 'opened')
     await refresh()
     window.location.href = `sms:${cleanPhone(customer.phoneNumber)}`
   }
@@ -555,22 +609,14 @@ function App() {
     } catch {
       showToast('본문 복사가 제한되었습니다. 템플릿 내용을 직접 복사하세요')
     }
-    const now = new Date().toISOString()
-    await appDb.contactLogs.add({
-      id: makeId('contact'),
-      customerListId: customer.customerListId,
-      customerId: customer.id,
-      type: 'templateSms',
-      templateId: template.id,
-      messageBody: body,
-      result: 'sentByUser',
-      createdAt: now,
-    })
+    await addTouchLog(customer, 'templateSms', 'sentByUser', body, template.id)
     await refresh()
     window.location.href = `sms:${cleanPhone(customer.phoneNumber)}`
   }
 
-  function callCustomer(customer: Customer) {
+  async function callCustomer(customer: Customer) {
+    await addTouchLog(customer, 'call', 'opened')
+    await refresh()
     window.location.href = `tel:${cleanPhone(customer.phoneNumber)}`
   }
 
@@ -680,7 +726,7 @@ function App() {
           longitude: hasCsvCoordinates ? mappedLongitude : undefined,
           coordinateSource: hasCsvCoordinates ? 'csv' : undefined,
           region: address ? extractRegion(address) : '주소 없음',
-          status: address ? 'open' : 'needsGeocode',
+          status: 'open',
           createdAt: now,
           updatedAt: now,
         }
@@ -889,6 +935,89 @@ function App() {
     showToast(`${list.name} 고객리스트를 삭제했습니다`)
   }
 
+  function openNewCustomerSheet() {
+    if (!activeList) {
+      showToast('고객리스트를 먼저 선택하세요')
+      return
+    }
+    setCustomerForm(blankCustomerForm())
+    setEditingCustomerId('new')
+  }
+
+  function openEditCustomerSheet(customer: Customer) {
+    setCustomerForm(customerToForm(customer))
+    setEditingCustomerId(customer.id)
+  }
+
+  function closeCustomerSheet() {
+    setEditingCustomerId(null)
+    setCustomerForm(blankCustomerForm())
+  }
+
+  async function saveCustomerForm() {
+    if (!activeList) {
+      showToast('고객리스트를 먼저 선택하세요')
+      return
+    }
+    const name = customerForm.name.trim()
+    const phoneNumber = customerForm.phoneNumber.trim()
+    const address = customerForm.address.trim()
+    const notes = customerForm.notes.trim()
+    if (!name) {
+      showToast('고객 이름을 입력하세요')
+      return
+    }
+    if (!phoneNumber && !address) {
+      showToast('연락처 또는 주소 중 하나는 입력하세요')
+      return
+    }
+    const now = new Date().toISOString()
+    if (editingCustomerId === 'new') {
+      await appDb.customers.add({
+        id: makeId('customer'),
+        customerListId: activeList.id,
+        name,
+        phoneNumber,
+        address,
+        notes,
+        region: address ? extractRegion(address) : '주소 없음',
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+      })
+      showToast(`${name} 고객을 추가했습니다`)
+    } else if (editingCustomerId) {
+      const existing = customers.find((customer) => customer.id === editingCustomerId)
+      const shouldClearCoordinates = existing?.address.trim() !== address
+      await appDb.customers.update(editingCustomerId, {
+        name,
+        phoneNumber,
+        address,
+        notes,
+        region: address ? extractRegion(address) : '주소 없음',
+        updatedAt: now,
+        ...(shouldClearCoordinates ? { latitude: undefined, longitude: undefined, coordinateSource: undefined, geocodedAt: undefined } : {}),
+      })
+      showToast(`${name} 고객 정보를 수정했습니다`)
+    }
+    closeCustomerSheet()
+    await refresh()
+  }
+
+  async function saveCustomerNote() {
+    if (!noteCustomer) return
+    const body = noteText.trim()
+    if (!body) {
+      showToast('메모 내용을 입력하세요')
+      return
+    }
+    await addTouchLog(noteCustomer, 'note', 'saved', body)
+    setNoteCustomerId(null)
+    setNoteText('')
+    await refresh()
+    showToast(`${noteCustomer.name} 메모를 저장했습니다`)
+  }
+
   function dismissInstallGuide() {
     localStorage.setItem(installGuideDismissedKey, 'true')
     setShowInstallGuide(false)
@@ -916,6 +1045,59 @@ function App() {
     const visits = visitLogs.filter((log) => log.customerListId === list.id).length
     const messages = contactLogs.filter((log) => log.customerListId === list.id).length
     return { total: listCustomers.length, open, visits, messages }
+  }
+
+  function customerHistory(customer: Customer) {
+    const visitEntries = visitLogs
+      .filter((log) => log.customerId === customer.id)
+      .map((log) => ({
+        id: log.id,
+        at: log.visitedAt,
+        title: '완료 처리',
+        detail: log.memo || '고객 서비스 완료',
+        tone: 'green' as const,
+      }))
+    const touchEntries = contactLogs
+      .filter((log) => log.customerId === customer.id)
+      .map((log) => ({
+        id: log.id,
+        at: log.createdAt,
+        title: contactLogTitle(log),
+        detail: log.messageBody || contactLogDetail(log),
+        tone: contactLogTone(log),
+      }))
+    return [...visitEntries, ...touchEntries].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+  }
+
+  function contactLogTitle(log: ContactLog) {
+    const labels: Record<ContactLog['type'], string> = {
+      call: '전화 시도',
+      manualSms: '문자 시도',
+      templateSms: '템플릿 문자 시도',
+      note: '상담 메모',
+      statusComplete: '완료 처리',
+      statusReopen: '완료 취소',
+    }
+    return labels[log.type]
+  }
+
+  function contactLogDetail(log: ContactLog) {
+    if (log.type === 'call') return '전화 앱 열기'
+    if (log.type === 'manualSms') return '문자 앱 열기'
+    if (log.type === 'templateSms') return '템플릿 복사 후 문자 앱 열기'
+    if (log.type === 'statusComplete') return '고객 서비스 완료'
+    if (log.type === 'statusReopen') return '다시 활성화'
+    return log.result
+  }
+
+  function contactLogTone(log: ContactLog): 'green' | 'orange' | 'blue' {
+    if (log.type === 'statusComplete') return 'green'
+    if (log.type === 'statusReopen') return 'blue'
+    return 'orange'
+  }
+
+  function latestHistory(customer: Customer) {
+    return customerHistory(customer)[0]
   }
 
   return (
@@ -952,10 +1134,90 @@ function App() {
       </nav>
 
       {messageCustomerId && renderMessageSheet()}
+      {historyCustomer && renderHistorySheet(historyCustomer)}
+      {noteCustomer && renderNoteSheet(noteCustomer)}
+      {editingCustomerId && renderCustomerEditor()}
       {showInstallGuide && renderInstallGuide()}
       {toast && <div className="toast">{toast}</div>}
     </main>
   )
+
+  function renderCustomerEditor() {
+    const isNew = editingCustomerId === 'new'
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={closeCustomerSheet}>
+        <section className="message-sheet" role="dialog" aria-label={isNew ? '고객 추가' : '고객 수정'} onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="panel-title">
+            <div>
+              <h2>{isNew ? '고객 추가' : '고객 수정'}</h2>
+              <span>{activeList?.name ?? '고객리스트 없음'}</span>
+            </div>
+            <button className="sheet-close" type="button" onClick={closeCustomerSheet}>닫기</button>
+          </div>
+          <div className="form-panel">
+            <input value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} placeholder="고객 이름" />
+            <input value={customerForm.phoneNumber} onChange={(event) => setCustomerForm({ ...customerForm, phoneNumber: event.target.value })} placeholder="연락처" />
+            <input value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} placeholder="주소" />
+            <textarea value={customerForm.notes} onChange={(event) => setCustomerForm({ ...customerForm, notes: event.target.value })} placeholder="메모" />
+            <button className="primary full" type="button" onClick={() => void saveCustomerForm()}><Save size={18} /> 저장</button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  function renderNoteSheet(customer: Customer) {
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={() => setNoteCustomerId(null)}>
+        <section className="message-sheet" role="dialog" aria-label={`${customer.name} 메모 추가`} onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="panel-title">
+            <div>
+              <h2>상담 메모</h2>
+              <span>{customer.name}</span>
+            </div>
+            <button className="sheet-close" type="button" onClick={() => setNoteCustomerId(null)}>닫기</button>
+          </div>
+          <div className="form-panel">
+            <textarea value={noteText} onChange={(event) => setNoteText(event.target.value)} placeholder="고객 대응 내용을 입력하세요" />
+            <button className="primary full" type="button" onClick={() => void saveCustomerNote()}><Save size={18} /> 메모 저장</button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  function renderHistorySheet(customer: Customer) {
+    const history = customerHistory(customer)
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={() => setHistoryCustomerId(null)}>
+        <section className="message-sheet" role="dialog" aria-label={`${customer.name} 히스토리`} onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="panel-title">
+            <div>
+              <h2>{customer.name}</h2>
+              <span>{customer.phoneNumber || '연락처 없음'}</span>
+            </div>
+            <button className="sheet-close" type="button" onClick={() => setHistoryCustomerId(null)}>닫기</button>
+          </div>
+          <div className="history-actions">
+            <button type="button" onClick={() => openEditCustomerSheet(customer)}><Pencil size={17} /> 수정</button>
+            <button type="button" onClick={() => { setNoteText(''); setNoteCustomerId(customer.id) }}><Plus size={17} /> 메모</button>
+          </div>
+          <div className="history-list">
+            {history.length ? history.map((entry) => (
+              <article className="history-item" key={entry.id}>
+                <span className={`pill ${entry.tone}`}>{entry.title}</span>
+                <strong>{formatTime(entry.at)}</strong>
+                <small>{entry.detail}</small>
+              </article>
+            )) : <EmptyState text="아직 고객 터치 이력이 없습니다." />}
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   function renderInstallGuide() {
     const isIos = isIosDevice()
@@ -1020,7 +1282,6 @@ function App() {
 
   function renderToday() {
     const targetList = todayMode === 'schedule' ? pendingScheduleCustomers : nearestCustomers
-    const next = currentCustomer
     return (
       <>
         <div className="segmented four">
@@ -1032,22 +1293,23 @@ function App() {
         </div>
         <section className="metric-grid">
           <Metric value={remainingCustomers.length} label="남은 고객" />
-          <Metric value={activeVisits.length} label="방문 로그" />
-          <Metric value={activeContacts.length} label="문자 로그" />
+          <Metric value={activeContacts.length + activeVisits.length} label="터치 이력" />
+          <Metric value={activeCustomers.filter((customer) => customer.status === 'done').length} label="완료 고객" />
         </section>
 
         {todayMode === 'region' && renderRegionGroups()}
         {todayMode === 'map' && renderMap(targetList)}
         {todayMode !== 'region' && todayMode !== 'map' && (
           <>
-            {next ? <HeroCustomer customer={next} badge={todayMode === 'schedule' ? '오늘 스케줄' : '가까운 순'} /> : <EmptyState text="오늘 남은 고객이 없습니다." />}
             <section className="panel">
-              <PanelTitle title={todayMode === 'schedule' ? '오늘 스케줄' : '남은 고객'} meta={`${targetList.length}명`} />
-              <div className="list-stack">
-                {targetList.slice(todayMode === 'schedule' ? 0 : 1).map((customer) => (
-                  <CustomerRow key={customer.id} customer={customer} showAdd={false} />
-                ))}
-              </div>
+              <PanelTitle title={todayMode === 'schedule' ? '오늘 스케줄 전체' : '남은 고객'} meta={`${targetList.length}명`} />
+              {targetList.length ? (
+                <div className="list-stack">
+                  {targetList.map((customer) => (
+                    <HeroCustomer key={customer.id} customer={customer} badge={todayMode === 'schedule' ? '오늘 스케줄' : '가까운 순'} />
+                  ))}
+                </div>
+              ) : <EmptyState text="표시할 고객이 없습니다." />}
             </section>
           </>
         )}
@@ -1134,6 +1396,7 @@ function App() {
 
         <section className="panel">
           <PanelTitle title="고객 목록" meta={`${filtered.length}명`} />
+          <button className="primary full customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
           <div className="list-stack">
             {filtered.map((customer) => (
               <CustomerRow key={customer.id} customer={customer} showAdd />
@@ -1183,30 +1446,28 @@ function App() {
   }
 
   function renderLogs() {
-    const logs = [
-      ...activeVisits.map((log) => ({ id: log.id, kind: '방문완료', customerId: log.customerId, at: log.visitedAt, detail: log.result })),
-      ...activeContacts.map((log) => ({ id: log.id, kind: log.type === 'manualSms' ? '사용자 문자' : '템플릿 문자', customerId: log.customerId, at: log.createdAt, detail: log.result })),
-    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    const doneCustomers = activeCustomers.filter((customer) => customer.status === 'done')
+    const touchedCustomers = activeCustomers.filter((customer) => customerHistory(customer).length > 0)
     return (
       <>
         <section className="metric-grid">
-          <Metric value={activeVisits.length} label="방문 로그" />
-          <Metric value={activeContacts.length} label="문자 로그" />
-          <Metric value={pendingScheduleCustomers.length} label="스케줄 남음" />
+          <Metric value={activeCustomers.length} label="전체 고객" />
+          <Metric value={touchedCustomers.length} label="터치 고객" />
+          <Metric value={doneCustomers.length} label="완료 고객" />
         </section>
         <section className="panel">
-          <PanelTitle title="활동 기록" meta={activeList?.name ?? ''} />
+          <PanelTitle title="고객별 히스토리" meta={activeList?.name ?? ''} />
           <div className="list-stack">
-            {logs.map((log) => {
-              const customer = customers.find((entry) => entry.id === log.customerId)
+            {activeCustomers.map((customer) => {
+              const latest = latestHistory(customer)
               return (
-                <article className="log-row" key={log.id}>
+                <article className={`history-customer-row ${customer.status === 'done' ? 'highlight-done' : ''}`} key={customer.id} onClick={() => setHistoryCustomerId(customer.id)}>
                   <div>
-                    <strong>{customer?.name ?? '고객 없음'}</strong>
-                    <span>{customer?.region} · 고객ID {log.customerId}</span>
-                    <small>{formatTime(log.at)} · 결과: {log.detail}</small>
+                    <strong>{customer.name}</strong>
+                    <span>{customer.region} · {customer.phoneNumber || '연락처 없음'}</span>
+                    <small>{latest ? `${latest.title} · ${formatTime(latest.at)}` : '아직 터치 이력 없음'}</small>
                   </div>
-                  <span className={log.kind === '방문완료' ? 'pill green' : 'pill orange'}>{log.kind}</span>
+                  <span className={`pill ${customer.status === 'done' ? 'green' : latest ? 'orange' : ''}`}>{customer.status === 'done' ? '완료' : latest ? '진행중' : '미터치'}</span>
                 </article>
               )
             })}
@@ -1324,11 +1585,12 @@ function App() {
 
   function HeroCustomer({ customer, badge }: { customer: Customer; badge: string }) {
     return (
-      <article className="hero-card">
+      <article className={`hero-card ${customer.status === 'done' ? 'is-done' : ''}`}>
         <div className="chip-row">
           <span className="pill blue">{badge}</span>
           <span className="pill">{customer.region}</span>
           <span className={hasTrustedCoordinates(customer) ? 'pill green' : 'pill orange'}>{customerDistanceLabel(customer)}</span>
+          <span className={`pill ${customer.status === 'done' ? 'green' : customer.status === 'hold' ? 'orange' : 'blue'}`}>{statusLabel(customer.status)}</span>
         </div>
         <div>
           <h2>{customer.name}</h2>
@@ -1336,22 +1598,36 @@ function App() {
           <small>{customer.notes}</small>
         </div>
         <ActionGrid customer={customer} />
-        <button className="complete full" type="button" onClick={() => completeVisit(customer)}><Check size={22} /> 방문완료</button>
+        <div className="secondary-grid">
+          <button className="secondary" type="button" onClick={() => setHistoryCustomerId(customer.id)}><CalendarCheck size={18} /> 히스토리</button>
+          <button className="secondary" type="button" onClick={() => { setNoteText(''); setNoteCustomerId(customer.id) }}><Plus size={18} /> 메모</button>
+          <button className="secondary" type="button" onClick={() => openEditCustomerSheet(customer)}><Pencil size={18} /> 수정</button>
+        </div>
+        {customer.status === 'done'
+          ? <button className="secondary full" type="button" onClick={() => void reopenCustomer(customer)}><RotateCcw size={22} /> 완료취소</button>
+          : <button className="complete full" type="button" onClick={() => void completeVisit(customer)}><Check size={22} /> 완료</button>}
       </article>
     )
   }
 
   function CustomerRow({ customer, showAdd }: { customer: Customer; showAdd: boolean }) {
     return (
-      <article className="customer-row" onClick={() => setSelectedCustomerId(customer.id)}>
+      <article className={`customer-row ${customer.status === 'done' ? 'is-done' : ''}`} onClick={() => setSelectedCustomerId(customer.id)}>
         <div>
           <strong>{customer.name}</strong>
           <span>{customer.region} · {customerDistanceLabel(customer)}</span>
           <small>{customer.address}</small>
+          {latestHistory(customer) && <small>최근: {latestHistory(customer)?.title} · {formatTime(latestHistory(customer)!.at)}</small>}
         </div>
         <span className={`pill ${customer.status === 'done' ? 'green' : customer.status === 'hold' ? 'orange' : 'blue'}`}>{statusLabel(customer.status)}</span>
         <ActionGrid customer={customer} />
+        <div className="secondary-grid">
+          <button className="secondary" type="button" onClick={() => setHistoryCustomerId(customer.id)}>히스토리</button>
+          <button className="secondary" type="button" onClick={() => { setNoteText(''); setNoteCustomerId(customer.id) }}>메모</button>
+          <button className="secondary" type="button" onClick={() => openEditCustomerSheet(customer)}>수정</button>
+        </div>
         {showAdd && customer.status === 'open' && <button className="secondary full" type="button" onClick={() => addSelectedToSchedule(customer)}>스케줄 추가</button>}
+        {customer.status === 'done' && <button className="secondary full" type="button" onClick={() => void reopenCustomer(customer)}><RotateCcw size={18} /> 완료취소</button>}
       </article>
     )
   }
@@ -1359,7 +1635,7 @@ function App() {
   function ActionGrid({ customer }: { customer: Customer }) {
     return (
       <div className="action-grid">
-        <button type="button" onClick={() => callCustomer(customer)}><PhoneCall size={18} /> 전화</button>
+        <button type="button" onClick={() => void callCustomer(customer)}><PhoneCall size={18} /> 전화</button>
         <button type="button" onClick={() => setMessageCustomerId(customer.id)}><MessageSquareText size={18} /> 문자</button>
         <button type="button" onClick={() => navigateCustomer(customer)}><Navigation size={18} /> 길찾기</button>
       </div>
@@ -1432,10 +1708,10 @@ function fieldLabel(field: FieldKey) {
 
 function statusLabel(status: Customer['status']) {
   const labels: Record<Customer['status'], string> = {
-    open: '미방문',
+    open: '활성',
     done: '완료',
     hold: '보류',
-    needsGeocode: '좌표확인',
+    needsGeocode: '주소확인',
   }
   return labels[status]
 }
