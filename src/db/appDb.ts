@@ -20,6 +20,7 @@ export interface Customer {
   name: string
   phoneNumber: string
   address: string
+  birthDate?: string
   notes: string
   latitude?: number
   longitude?: number

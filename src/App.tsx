@@ -38,7 +38,7 @@ import './App.css'
 
 type TabKey = 'today' | 'customers' | 'import' | 'logs' | 'settings'
 type TodayMode = 'schedule' | 'nearest' | 'region' | 'map'
-type ListFilterKey = 'open' | 'done' | 'all'
+type ListFilterKey = 'open' | 'done' | 'all' | 'age'
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
@@ -54,6 +54,7 @@ type CustomerForm = {
   name: string
   phoneNumber: string
   address: string
+  birthDate: string
   notes: string
 }
 
@@ -63,7 +64,7 @@ type ParsedCsv = {
   mapping: FieldMapping
 }
 
-type FieldKey = 'name' | 'phoneNumber' | 'address' | 'notes' | 'latitude' | 'longitude'
+type FieldKey = 'name' | 'phoneNumber' | 'address' | 'birthDate' | 'notes' | 'latitude' | 'longitude'
 type FieldMapping = Record<FieldKey, number | null>
 
 const installGuideDismissedKey = 'installGuideDismissed'
@@ -79,7 +80,8 @@ const userLocationIcon = L.divIcon({
 const aliases: Record<FieldKey, string[]> = {
   name: ['고객명', '고객 이름', '이름', '성명', '거래처명', '회사명', 'name', 'customer', 'customername'],
   phoneNumber: ['연락처', '전화번호', '휴대폰', '핸드폰', '휴대전화', 'mobile', 'phone', 'tel', 'telephone'],
-  address: ['주소', '방문주소', '사업장주소', '고객주소', 'address', 'addr', 'location'],
+  address: ['주소', '우편물주소', '우편주소', '방문주소', '사업장주소', '고객주소', 'address', 'addr', 'location'],
+  birthDate: ['생년월일', '생일', '출생일', '출생년도', '생년', 'birth', 'birthday', 'birthdate', 'dateofbirth', 'dob'],
   notes: ['메모', '비고', '기타', '기타사항', '담당자메모', 'notes', 'note', 'memo', 'remark'],
   latitude: ['위도', 'lat', 'latitude', 'y', 'goaly'],
   longitude: ['경도', 'lng', 'lon', 'long', 'longitude', 'x', 'goalx'],
@@ -197,7 +199,7 @@ function normalizeHeader(value: string) {
 }
 
 function detectMapping(headers: string[]): FieldMapping {
-  const mapping: FieldMapping = { name: null, phoneNumber: null, address: null, notes: null, latitude: null, longitude: null }
+  const mapping: FieldMapping = { name: null, phoneNumber: null, address: null, birthDate: null, notes: null, latitude: null, longitude: null }
   headers.forEach((header, index) => {
     const normalized = normalizeHeader(header)
     ;(Object.keys(aliases) as FieldKey[]).forEach((field) => {
@@ -241,7 +243,7 @@ function extractRegion(address: string) {
   const district = parts[baseIndex]
   const afterBase = parts.slice(baseIndex + 1)
   const dong = afterBase.find(isAdministrativeArea)
-  const road = afterBase.map((part) => parseRoadAddressToken(part)?.road ?? '').find((part) => part && part !== dong)
+  const road = findRoadAddress(afterBase)?.road ?? ''
   const regionParts = [district, dong, road].filter(Boolean)
   if (regionParts.length) return regionParts.join(' ')
   return '지역 미확인'
@@ -259,25 +261,69 @@ function displayRegion(customer: Pick<Customer, 'address' | 'region'>) {
   return customer.address.trim() ? extractRegion(customer.address) : customer.region ?? '주소 없음'
 }
 
+function birthDateLabel(customer: Pick<Customer, 'birthDate'>) {
+  return parseBirthDate(customer.birthDate ?? '') ?? '생년월일 없음'
+}
+
+function ageGroup(customer: Pick<Customer, 'birthDate'>) {
+  const birthDate = parseBirthDate(customer.birthDate ?? '')
+  if (!birthDate) return '나이 미상'
+  const age = calculateAge(birthDate)
+  if (age < 20) return '10대 이하'
+  if (age >= 80) return '80대 이상'
+  return `${Math.floor(age / 10) * 10}대`
+}
+
 function normalizeAddressForMapSearch(address: string) {
   const normalized = normalizeAddressText(address)
   if (!normalized) return ''
 
   const parts = normalized.split(' ').filter(Boolean)
-  const roadIndex = parts.findIndex((part) => Boolean(parseRoadAddressToken(part)))
-  if (roadIndex === -1) return normalized
+  const roadAddress = findRoadAddress(parts)
+  if (!roadAddress) return normalized
+  const base = [...parts.slice(0, roadAddress.index), roadAddress.road]
+  if (roadAddress.buildingNumber) base.push(roadAddress.buildingNumber)
+  return base.join(' ')
+}
 
-  const parsedRoad = parseRoadAddressToken(parts[roadIndex])
-  if (!parsedRoad) return normalized
-  if (parsedRoad.buildingNumber) {
-    return [...parts.slice(0, roadIndex), parsedRoad.road, parsedRoad.buildingNumber].join(' ')
-  }
+function expandAddressContext(address: string) {
+  const normalized = normalizeAddressForMapSearch(address)
+  if (/^(수정구|중원구|분당구)\s/.test(normalized)) return `경기도 성남시 ${normalized}`
+  return normalized
+}
 
-  const next = parts[roadIndex + 1]
-  if (next && isAddressNumber(next)) {
-    return [...parts.slice(0, roadIndex), parsedRoad.road, next].join(' ')
-  }
-  return [...parts.slice(0, roadIndex), parsedRoad.road].join(' ')
+function preferredGeocodeQuery(address: string) {
+  return expandAddressContext(address) || normalizeAddressForMapSearch(address)
+}
+
+function normalizeAddressForRoadSearch(address: string) {
+  const exact = normalizeAddressForMapSearch(address)
+  const parts = exact.split(' ').filter(Boolean)
+  const roadAddress = findRoadAddress(parts)
+  if (!roadAddress) return exact
+  return [...parts.slice(0, roadAddress.index), roadAddress.road].join(' ')
+}
+
+function normalizeAddressForBroadRoadSearch(address: string) {
+  const roadOnly = normalizeAddressForRoadSearch(address)
+  const parts = roadOnly.split(' ').filter(Boolean)
+  const roadAddress = findRoadAddress(parts)
+  if (!roadAddress) return roadOnly
+  const broadRoad = roadAddress.road.replace(/\d+(?:번)?길$/, '')
+  if (!broadRoad || broadRoad === roadAddress.road) return roadOnly
+  return [...parts.slice(0, roadAddress.index), broadRoad].join(' ')
+}
+
+function geocodeCandidateQueries(address: string) {
+  return uniqueNonEmpty([
+    expandAddressContext(address),
+    normalizeAddressForMapSearch(address),
+    expandAddressContext(normalizeAddressForRoadSearch(address)),
+    normalizeAddressForRoadSearch(address),
+    expandAddressContext(normalizeAddressForBroadRoadSearch(address)),
+    normalizeAddressForBroadRoadSearch(address),
+    address,
+  ])
 }
 
 function normalizeAddressText(address: string) {
@@ -296,6 +342,65 @@ function parseRoadAddressToken(value: string) {
   const standardRoad = value.match(/^(.+?(?:대로|로|길))(\d+(?:-\d+)?)?(?:번지|호)?$/)
   if (standardRoad) return { road: standardRoad[1], buildingNumber: standardRoad[2] ?? '' }
   return null
+}
+
+function findRoadAddress(parts: string[]) {
+  for (let index = 0; index < parts.length; index += 1) {
+    const parsed = parseRoadAddressToken(parts[index])
+    if (!parsed) continue
+
+    const next = parts[index + 1] ?? ''
+    const nextBranch = next.match(/^(\d+(?:번)?길)(\d+(?:-\d+)?)?(?:번지|호)?$/)
+    if (nextBranch && /(?:대로|로)$/.test(parsed.road)) {
+      const following = parts[index + 2] ?? ''
+      const buildingNumber = nextBranch[2] || (isAddressNumber(following) ? following : '')
+      return { index, road: `${parsed.road}${nextBranch[1]}`, buildingNumber }
+    }
+
+    if (parsed.buildingNumber) return { index, ...parsed }
+    if (next && isAddressNumber(next)) return { index, road: parsed.road, buildingNumber: next }
+    return { index, ...parsed }
+  }
+  return null
+}
+
+function parseBirthDate(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const digits = trimmed.replace(/\D/g, '')
+  let year = ''
+  let month = ''
+  let day = ''
+  if (digits.length >= 8) {
+    year = digits.slice(0, 4)
+    month = digits.slice(4, 6)
+    day = digits.slice(6, 8)
+  } else if (digits.length === 6) {
+    const yy = Number(digits.slice(0, 2))
+    const currentYY = new Date().getFullYear() % 100
+    year = `${yy > currentYY ? 1900 + yy : 2000 + yy}`
+    month = digits.slice(2, 4)
+    day = digits.slice(4, 6)
+  } else if (digits.length === 4) {
+    year = digits
+    month = '01'
+    day = '01'
+  } else {
+    return ''
+  }
+  const iso = `${year}-${month}-${day}`
+  const parsed = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return ''
+  if (parsed.getFullYear() !== Number(year) || parsed.getMonth() + 1 !== Number(month) || parsed.getDate() !== Number(day)) return ''
+  return iso
+}
+
+function calculateAge(birthDate: string) {
+  const [year, month, day] = birthDate.split('-').map(Number)
+  const now = new Date()
+  let age = now.getFullYear() - year
+  if (now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day)) age -= 1
+  return age
 }
 
 function uniqueNonEmpty(values: string[]) {
@@ -322,7 +427,7 @@ function formatTime(value: string) {
 }
 
 function blankCustomerForm(): CustomerForm {
-  return { name: '', phoneNumber: '', address: '', notes: '' }
+  return { name: '', phoneNumber: '', address: '', birthDate: '', notes: '' }
 }
 
 function customerToForm(customer: Customer): CustomerForm {
@@ -330,6 +435,7 @@ function customerToForm(customer: Customer): CustomerForm {
     name: customer.name,
     phoneNumber: customer.phoneNumber,
     address: customer.address,
+    birthDate: customer.birthDate ?? '',
     notes: customer.notes,
   }
 }
@@ -369,7 +475,7 @@ async function fetchGeocodeResult(query: string) {
 }
 
 async function geocodeAddress(address: string) {
-  const candidates = uniqueNonEmpty([normalizeAddressForMapSearch(address), address])
+  const candidates = geocodeCandidateQueries(address)
   for (const query of candidates) {
     const result = await fetchGeocodeResult(query)
     if (result) return { ...result, query }
@@ -754,7 +860,8 @@ function App() {
     if (!customer.address.trim()) return false
     if (!hasTrustedCoordinates(customer)) return true
     if (customer.coordinateSource !== 'geocoded') return false
-    return customer.geocodeQuery !== normalizeAddressForMapSearch(customer.address)
+    if (!customer.geocodeQuery) return true
+    return !geocodeCandidateQueries(customer.address).includes(customer.geocodeQuery)
   }
 
   function openTmapRoute(customer: Customer) {
@@ -774,7 +881,7 @@ function App() {
   }
 
   function navigationDestination(customer: Customer) {
-    return normalizeAddressForMapSearch(customer.address) || customer.address.trim() || customer.name.trim()
+    return preferredGeocodeQuery(customer.address) || customer.address.trim() || customer.name.trim()
   }
 
   function openExternalApp(url: string) {
@@ -835,6 +942,7 @@ function App() {
         const name = getMappedValue(row, csv.mapping.name)
         const phoneNumber = getMappedValue(row, csv.mapping.phoneNumber)
         const address = getMappedValue(row, csv.mapping.address)
+        const birthDate = parseBirthDate(getMappedValue(row, csv.mapping.birthDate))
         const notes = getMappedValue(row, csv.mapping.notes)
         if (!name || (!phoneNumber && !address)) return null
         const mappedLatitude = parseCoordinate(getMappedValue(row, csv.mapping.latitude), 'latitude')
@@ -846,6 +954,7 @@ function App() {
           name,
           phoneNumber,
           address,
+          birthDate: birthDate || undefined,
           notes,
           latitude: hasCsvCoordinates ? mappedLatitude : undefined,
           longitude: hasCsvCoordinates ? mappedLongitude : undefined,
@@ -1141,6 +1250,7 @@ function App() {
     const name = customerForm.name.trim()
     const phoneNumber = customerForm.phoneNumber.trim()
     const address = customerForm.address.trim()
+    const birthDate = parseBirthDate(customerForm.birthDate)
     const notes = customerForm.notes.trim()
     if (!name) {
       showToast('고객 이름을 입력하세요')
@@ -1158,6 +1268,7 @@ function App() {
         name,
         phoneNumber,
         address,
+        birthDate: birthDate || undefined,
         notes,
         region: address ? extractRegion(address) : '주소 없음',
         status: 'open',
@@ -1172,6 +1283,7 @@ function App() {
         name,
         phoneNumber,
         address,
+        birthDate: birthDate || undefined,
         notes,
         region: address ? extractRegion(address) : '주소 없음',
         updatedAt: now,
@@ -1345,6 +1457,7 @@ function App() {
             <input value={customerForm.name} onChange={(event) => setCustomerForm({ ...customerForm, name: event.target.value })} placeholder="고객 이름" />
             <input value={customerForm.phoneNumber} onChange={(event) => setCustomerForm({ ...customerForm, phoneNumber: event.target.value })} placeholder="연락처" />
             <input value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} placeholder="주소" />
+            <input value={customerForm.birthDate} onChange={(event) => setCustomerForm({ ...customerForm, birthDate: event.target.value })} placeholder="생년월일 예: 19800101" />
             <textarea value={customerForm.notes} onChange={(event) => setCustomerForm({ ...customerForm, notes: event.target.value })} placeholder="메모" />
             <button className="primary full" type="button" onClick={() => void saveCustomerForm()}><Save size={18} /> 저장</button>
           </div>
@@ -1517,6 +1630,7 @@ function App() {
         : listFilter === 'done'
           ? activeCustomers.filter((customer) => customer.status === 'done')
           : activeCustomers
+    const showFlatCustomerList = listFilter !== 'age'
     return (
       <>
         <section className="panel">
@@ -1581,21 +1695,24 @@ function App() {
           </button>
         </section>
 
-        <div className="segmented">
+        <div className="segmented four">
           <button className={listFilter === 'open' ? 'active' : ''} type="button" onClick={() => setListFilter('open')}>미방문</button>
           <button className={listFilter === 'done' ? 'active' : ''} type="button" onClick={() => setListFilter('done')}>완료</button>
           <button className={listFilter === 'all' ? 'active' : ''} type="button" onClick={() => setListFilter('all')}>전체</button>
+          <button className={listFilter === 'age' ? 'active' : ''} type="button" onClick={() => setListFilter('age')}>나이별</button>
         </div>
 
-        <section className="panel">
-          <PanelTitle title="고객 목록" meta={`${filtered.length}명`} />
-          <button className="primary full customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
-          <div className="list-stack">
-            {filtered.map((customer) => (
-              <CustomerRow key={customer.id} customer={customer} showAdd />
-            ))}
-          </div>
-        </section>
+        {showFlatCustomerList ? (
+          <section className="panel">
+            <PanelTitle title="고객 목록" meta={`${filtered.length}명`} />
+            <button className="primary full customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
+            <div className="list-stack">
+              {filtered.map((customer) => (
+                <CustomerRow key={customer.id} customer={customer} showAdd />
+              ))}
+            </div>
+          </section>
+        ) : renderAgeGroups()}
       </>
     )
   }
@@ -1819,6 +1936,29 @@ function App() {
     )
   }
 
+  function renderAgeGroups() {
+    const groups = activeCustomers.reduce<Record<string, Customer[]>>((acc, customer) => {
+      const key = ageGroup(customer)
+      acc[key] = [...(acc[key] ?? []), customer]
+      return acc
+    }, {})
+    const order = (label: string) => (label === '나이 미상' ? 999 : label === '10대 이하' ? 10 : Number(label.replace(/\D/g, '')) || 998)
+    const entries = Object.entries(groups).sort(([a], [b]) => order(a) - order(b))
+    return (
+      <section className="panel">
+        <PanelTitle title="나이별 보기" meta={`${entries.length}개 그룹`} />
+        {entries.map(([group, groupCustomers]) => (
+          <div className="region-group" key={group}>
+            <h2>{group}</h2>
+            <div className="list-stack">
+              {groupCustomers.map((customer) => <CustomerRow key={customer.id} customer={customer} showAdd />)}
+            </div>
+          </div>
+        ))}
+      </section>
+    )
+  }
+
   function HeroCustomer({ customer, badge }: { customer: Customer; badge: string }) {
     return (
       <article className={`hero-card ${customer.status === 'done' ? 'is-done' : ''}`}>
@@ -1853,6 +1993,7 @@ function App() {
           <strong>{customer.name}</strong>
           <span>{displayRegion(customer)} · {customerDistanceLabel(customer)}</span>
           <small>{customer.address}</small>
+          {customer.birthDate && <small>{birthDateLabel(customer)} · {ageGroup(customer)}</small>}
           {latestHistory(customer) && <small>최근: {latestHistory(customer)?.title} · {formatTime(latestHistory(customer)!.at)}</small>}
         </div>
         <span className={`pill ${customer.status === 'done' ? 'green' : customer.status === 'hold' ? 'orange' : 'blue'}`}>{statusLabel(customer.status)}</span>
@@ -1954,6 +2095,7 @@ function fieldLabel(field: FieldKey) {
     name: '고객명',
     phoneNumber: '연락처',
     address: '주소',
+    birthDate: '생년월일',
     notes: '기타사항',
     latitude: '위도',
     longitude: '경도',
