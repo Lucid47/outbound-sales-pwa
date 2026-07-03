@@ -326,6 +326,27 @@ function geocodeCandidateQueries(address: string) {
   ])
 }
 
+function sharedGeocodeCandidateQueries(address: string) {
+  return uniqueNonEmpty([
+    expandAddressContext(address),
+    normalizeAddressForMapSearch(address),
+    expandAddressContext(normalizeAddressForRoadSearch(address)),
+    normalizeAddressForRoadSearch(address),
+    expandAddressContext(normalizeAddressForBroadRoadSearch(address)),
+    normalizeAddressForBroadRoadSearch(address),
+  ])
+}
+
+function isSearchableAddress(address: string) {
+  const normalized = normalizeAddressText(address)
+  if (!normalized || /주소\s*미확인/.test(normalized)) return false
+  return Boolean(findRoadAddress(normalized.split(' ').filter(Boolean)))
+}
+
+function geocodeGroupKey(customer: Customer) {
+  return sharedGeocodeCandidateQueries(customer.address).join('|') || normalizeAddressText(customer.address)
+}
+
 function normalizeAddressText(address: string) {
   return address
     .replace(/\([^)]*\)/g, ' ')
@@ -857,7 +878,7 @@ function App() {
   }
 
   function needsMapLocationRefresh(customer: Customer) {
-    if (!customer.address.trim()) return false
+    if (!isSearchableAddress(customer.address)) return false
     if (!hasTrustedCoordinates(customer)) return true
     if (customer.coordinateSource !== 'geocoded') return false
     if (!customer.geocodeQuery) return true
@@ -1031,48 +1052,57 @@ function App() {
       if (!options.automatic) showToast('지도에 표시할 위치가 모두 준비되어 있습니다')
       return
     }
+    const targetGroups = Array.from(
+      targets.reduce<Map<string, Customer[]>>((groups, customer) => {
+        const key = geocodeGroupKey(customer)
+        groups.set(key, [...(groups.get(key) ?? []), customer])
+        return groups
+      }, new Map()).values(),
+    )
 
     let failed = 0
-    setGeocodeProgress({ running: true, done: 0, total: targets.length, failed: 0, current: '' })
+    setGeocodeProgress({ running: true, done: 0, total: targetGroups.length, failed: 0, current: '' })
     if (options.automatic) showToast('고객 주소를 지도에 표시하는 중입니다')
 
-    for (let index = 0; index < targets.length; index += 1) {
-      const customer = targets[index]
-      setGeocodeProgress({ running: true, done: index, total: targets.length, failed, current: customer.name })
+    for (let index = 0; index < targetGroups.length; index += 1) {
+      const group = targetGroups[index]
+      const representative = group[0]
+      const currentLabel = group.length > 1 ? `${representative.name} 외 ${group.length - 1}명` : representative.name
+      setGeocodeProgress({ running: true, done: index, total: targetGroups.length, failed, current: currentLabel })
       try {
-        const result = await geocodeAddress(customer.address)
+        const result = await geocodeAddress(representative.address)
         if (result) {
           const now = new Date().toISOString()
-          await appDb.customers.update(customer.id, {
-            latitude: result.latitude,
-            longitude: result.longitude,
-            coordinateSource: 'geocoded',
-            geocodedAt: now,
-            geocodeQuery: result.query,
-            updatedAt: now,
-          })
+          await Promise.all(group.map((customer) => appDb.customers.update(customer.id, {
+              latitude: result.latitude,
+              longitude: result.longitude,
+              coordinateSource: 'geocoded',
+              geocodedAt: now,
+              geocodeQuery: result.query,
+              updatedAt: now,
+            })))
         } else {
-          if (customer.coordinateSource === 'geocoded') {
-            await appDb.customers.update(customer.id, {
-              latitude: undefined,
-              longitude: undefined,
-              coordinateSource: undefined,
-              geocodedAt: undefined,
-              geocodeQuery: undefined,
-              updatedAt: new Date().toISOString(),
-            })
-          }
-          failed += 1
+          await Promise.all(group
+            .filter((customer) => customer.coordinateSource === 'geocoded')
+            .map((customer) => appDb.customers.update(customer.id, {
+                latitude: undefined,
+                longitude: undefined,
+                coordinateSource: undefined,
+                geocodedAt: undefined,
+                geocodeQuery: undefined,
+                updatedAt: new Date().toISOString(),
+              })))
+          failed += group.length
         }
       } catch {
-        failed += 1
+        failed += group.length
       }
-      setGeocodeProgress({ running: true, done: index + 1, total: targets.length, failed, current: customer.name })
-      if (index < targets.length - 1) await wait(1100)
+      setGeocodeProgress({ running: true, done: index + 1, total: targetGroups.length, failed, current: currentLabel })
+      if (index < targetGroups.length - 1) await wait(1100)
     }
 
     await refresh()
-    setGeocodeProgress({ running: false, done: targets.length, total: targets.length, failed, current: '' })
+    setGeocodeProgress({ running: false, done: targetGroups.length, total: targetGroups.length, failed, current: '' })
     showToast(failed ? `지도 표시 준비 완료: ${targets.length - failed}명 성공, ${failed}명 확인 필요` : `${targets.length}명 위치를 지도에 표시할 수 있습니다`)
   }
 
@@ -1852,8 +1882,8 @@ function App() {
     const mapList = list.filter(hasTrustedCoordinates)
     const selected = selectedCustomer && hasTrustedCoordinates(selectedCustomer) ? selectedCustomer : mapList[0]
     const path = mapList.map((customer) => [customer.latitude!, customer.longitude!] as [number, number])
-    const pendingLocationCount = list.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer)).length
-    const missingAddressCount = list.filter((customer) => !customer.address.trim() && !hasTrustedCoordinates(customer)).length
+    const pendingLocationCount = list.filter(needsMapLocationRefresh).length
+    const missingAddressCount = list.filter((customer) => !isSearchableAddress(customer.address) && !hasTrustedCoordinates(customer)).length
     return (
       <>
         <section className="panel">
