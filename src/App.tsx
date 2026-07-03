@@ -244,14 +244,27 @@ function extractRegion(address: string) {
   const district = parts[baseIndex]
   const afterBase = parts.slice(baseIndex + 1)
   const dong = afterBase.find((part) => /(?:동|읍|면|리)$/.test(part) && !isAddressNumber(part))
-  const road = afterBase.find((part) => /(?:대로|로|길|번길)$/.test(part) && !isAddressNumber(part) && part !== dong)
+  const road = afterBase.map(extractRoadName).find((part) => part && part !== dong)
   const regionParts = [district, dong, road].filter(Boolean)
   if (regionParts.length) return regionParts.join(' ')
   return '지역 미확인'
 }
 
+function extractRoadName(value: string) {
+  if (isAddressNumber(value)) return ''
+  const withoutBuildingNumber = value.replace(/\d+(?:-\d+)?(?:번지|호)?$/, '')
+  const numberedBranch = withoutBuildingNumber.match(/^(.+?(?:대로|로))\d+번길/)
+  if (numberedBranch) return numberedBranch[1]
+  const road = withoutBuildingNumber.match(/^(.+?(?:대로|로|길))/)
+  return road?.[1] ?? ''
+}
+
 function isAddressNumber(value: string) {
   return /^\d+(?:-\d+)?(?:번지|호)?$/.test(value)
+}
+
+function displayRegion(customer: Pick<Customer, 'address' | 'region'>) {
+  return customer.address.trim() ? extractRegion(customer.address) : customer.region ?? '주소 없음'
 }
 
 function distanceKm(from: [number, number], to: [number, number]) {
@@ -717,7 +730,7 @@ function App() {
     return templateBody
       .replaceAll('{고객명}', customer.name)
       .replaceAll('{고객사명}', activeList?.companyName ?? '')
-      .replaceAll('{지역}', customer.region ?? '')
+      .replaceAll('{지역}', displayRegion(customer))
       .replaceAll('{주소}', customer.address)
   }
 
@@ -1472,7 +1485,7 @@ function App() {
                   <span>{item.orderIndex}</span>
                   <div>
                     <strong>{customer.name}</strong>
-                    <small>{customer.region} · {item.status}</small>
+                    <small>{displayRegion(customer)} · {item.status}</small>
                   </div>
                   <button className="danger-icon" type="button" aria-label={`${customer.name} 스케줄 삭제`} onClick={() => void removeScheduleItem(item, customer)}>
                     <Trash2 size={20} />
@@ -1578,7 +1591,7 @@ function App() {
                 <article className={`history-customer-row ${customer.status === 'done' ? 'highlight-done' : ''}`} key={customer.id} onClick={() => setHistoryCustomerId(customer.id)}>
                   <div>
                     <strong>{customer.name}</strong>
-                    <span>{customer.region} · {customer.phoneNumber || '연락처 없음'}</span>
+                    <span>{displayRegion(customer)} · {customer.phoneNumber || '연락처 없음'}</span>
                     <small>{latest ? `${latest.title} · ${formatTime(latest.at)}` : '아직 터치 이력 없음'}</small>
                   </div>
                   <span className={`pill ${customer.status === 'done' ? 'green' : latest ? 'orange' : ''}`}>{customer.status === 'done' ? '완료' : latest ? '진행중' : '미터치'}</span>
@@ -1721,7 +1734,7 @@ function App() {
 
   function renderRegionGroups() {
     const groups = remainingCustomers.reduce<Record<string, Customer[]>>((acc, customer) => {
-      const key = customer.region ?? '지역 미확인'
+      const key = displayRegion(customer)
       acc[key] = [...(acc[key] ?? []), customer]
       return acc
     }, {})
@@ -1745,7 +1758,7 @@ function App() {
       <article className={`hero-card ${customer.status === 'done' ? 'is-done' : ''}`}>
         <div className="chip-row">
           <span className="pill blue">{badge}</span>
-          <span className="pill">{customer.region}</span>
+          <span className="pill">{displayRegion(customer)}</span>
           <span className={hasTrustedCoordinates(customer) ? 'pill green' : 'pill orange'}>{customerDistanceLabel(customer)}</span>
           <span className={`pill ${customer.status === 'done' ? 'green' : customer.status === 'hold' ? 'orange' : 'blue'}`}>{statusLabel(customer.status)}</span>
         </div>
@@ -1772,7 +1785,7 @@ function App() {
       <article className={`customer-row ${customer.status === 'done' ? 'is-done' : ''}`} onClick={() => setSelectedCustomerId(customer.id)}>
         <div>
           <strong>{customer.name}</strong>
-          <span>{customer.region} · {customerDistanceLabel(customer)}</span>
+          <span>{displayRegion(customer)} · {customerDistanceLabel(customer)}</span>
           <small>{customer.address}</small>
           {latestHistory(customer) && <small>최근: {latestHistory(customer)?.title} · {formatTime(latestHistory(customer)!.at)}</small>}
         </div>
