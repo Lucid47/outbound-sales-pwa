@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import { useMap } from 'react-leaflet'
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet'
+import { MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet'
 import L from 'leaflet'
 import {
   CalendarCheck,
@@ -76,6 +76,17 @@ const userLocationIcon = L.divIcon({
   iconAnchor: [16, 44],
   popupAnchor: [0, -42],
 })
+
+function customerMapIcon(customer: Customer, selected: boolean, scheduled: boolean) {
+  const statusClass = customer.status === 'done' ? 'done' : scheduled ? 'scheduled' : 'open'
+  return L.divIcon({
+    className: `customer-map-pin ${statusClass} ${selected ? 'selected' : ''}`,
+    html: '<span></span>',
+    iconSize: [30, 42],
+    iconAnchor: [15, 42],
+    popupAnchor: [0, -40],
+  })
+}
 
 const aliases: Record<FieldKey, string[]> = {
   name: ['고객명', '고객 이름', '이름', '성명', '거래처명', '회사명', 'name', 'customer', 'customername'],
@@ -345,6 +356,20 @@ function isSearchableAddress(address: string) {
 
 function geocodeGroupKey(customer: Customer) {
   return sharedGeocodeCandidateQueries(customer.address).join('|') || normalizeAddressText(customer.address)
+}
+
+function mapMissingReason(customer: Customer) {
+  if (!normalizeAddressText(customer.address) || /주소\s*미확인/.test(normalizeAddressText(customer.address))) return '주소 없음'
+  if (!isSearchableAddress(customer.address)) return '도로명주소 인식 실패'
+  if (needsCoordinateCheck(customer)) return '위치 확인 필요'
+  return 'OSM 검색 결과 없음'
+}
+
+function needsCoordinateCheck(customer: Customer) {
+  if (!isSearchableAddress(customer.address)) return false
+  if (customer.coordinateSource !== 'geocoded') return false
+  if (!customer.geocodeQuery) return true
+  return !geocodeCandidateQueries(customer.address).includes(customer.geocodeQuery)
 }
 
 function normalizeAddressText(address: string) {
@@ -881,8 +906,7 @@ function App() {
     if (!isSearchableAddress(customer.address)) return false
     if (!hasTrustedCoordinates(customer)) return true
     if (customer.coordinateSource !== 'geocoded') return false
-    if (!customer.geocodeQuery) return true
-    return !geocodeCandidateQueries(customer.address).includes(customer.geocodeQuery)
+    return needsCoordinateCheck(customer)
   }
 
   function openTmapRoute(customer: Customer) {
@@ -1707,6 +1731,8 @@ function App() {
           <button className="secondary full" type="button" onClick={sortScheduleByDistance}>가까운 순 정렬</button>
         </section>
 
+        {renderMap(activeCustomers, { title: '고객 위치 지도', subtitle: '전체 고객 기준', showHero: false, showMissingList: true })}
+
         <section className="panel form-panel">
           <PanelTitle title="지도 위치 표시" meta={`표시 가능 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
           <p className="backup-note">고객 주소를 지도 핀으로 표시할 수 있게 준비합니다. 많은 주소를 한 번에 처리하면 지도 서비스가 막을 수 있어 1초에 1명씩 천천히 확인합니다.</p>
@@ -1878,16 +1904,23 @@ function App() {
     )
   }
 
-  function renderMap(list: Customer[]) {
+  function renderMap(
+    list: Customer[],
+    options: { title?: string; subtitle?: string; showHero?: boolean; showMissingList?: boolean } = {},
+  ) {
     const mapList = list.filter(hasTrustedCoordinates)
     const selected = selectedCustomer && hasTrustedCoordinates(selectedCustomer) ? selectedCustomer : mapList[0]
     const path = mapList.map((customer) => [customer.latitude!, customer.longitude!] as [number, number])
     const pendingLocationCount = list.filter(needsMapLocationRefresh).length
     const missingAddressCount = list.filter((customer) => !isSearchableAddress(customer.address) && !hasTrustedCoordinates(customer)).length
+    const missingCustomers = list.filter((customer) => !hasTrustedCoordinates(customer))
+    const scheduledIds = new Set(activeScheduleItems.map((item) => item.customerId))
+    const showHero = options.showHero ?? true
     return (
       <>
         <section className="panel">
-          <PanelTitle title="오늘 지도" meta={`${mapList.length}/${list.length}명 표시`} />
+          <PanelTitle title={options.title ?? '오늘 지도'} meta={`${mapList.length}/${list.length}명 표시`} />
+          {options.subtitle && <p className="backup-note">{options.subtitle}</p>}
           <div className="map-frame">
             <button className="map-overlay-location" type="button" onClick={requestLocation}>
               <Navigation size={18} />
@@ -1904,15 +1937,18 @@ function App() {
               )}
               {path.length > 1 && <Polyline positions={path} pathOptions={{ color: '#1f6feb', weight: 4, dashArray: '8 8' }} />}
               {mapList.map((customer, index) => (
-                <CircleMarker
+                <Marker
                   key={customer.id}
-                  center={[customer.latitude!, customer.longitude!]}
-                  radius={customer.id === selectedCustomerId ? 14 : 11}
+                  position={[customer.latitude!, customer.longitude!]}
+                  icon={customerMapIcon(customer, customer.id === selectedCustomerId, scheduledIds.has(customer.id))}
                   eventHandlers={{ click: () => setSelectedCustomerId(customer.id) }}
-                  pathOptions={{ color: '#162032', fillColor: customer.id === selectedCustomerId ? '#1f6feb' : '#162032', fillOpacity: 0.9 }}
                 >
-                  <Popup>{index + 1}. {customer.name}</Popup>
-                </CircleMarker>
+                  <Popup>
+                    <strong>{index + 1}. {customer.name}</strong><br />
+                    {normalizeAddressForMapSearch(customer.address) || customer.address}<br />
+                    {scheduledIds.has(customer.id) ? '오늘 스케줄 포함' : '스케줄 미포함'}
+                  </Popup>
+                </Marker>
               ))}
             </MapContainer>
           </div>
@@ -1939,8 +1975,18 @@ function App() {
               <span>고객 수정에서 주소를 입력하면 지도 표시 대상에 포함됩니다.</span>
             </div>
           )}
+          {options.showMissingList && missingCustomers.length > 0 && (
+            <div className="map-missing-list">
+              <strong>지도에 표시되지 않은 고객</strong>
+              <div>
+                {missingCustomers.map((customer) => (
+                  <span key={customer.id}>{customer.name} · {mapMissingReason(customer)}</span>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
-        {selected && <HeroCustomer customer={selected} badge="지도 선택" />}
+        {showHero && selected && <HeroCustomer customer={selected} badge="지도 선택" />}
       </>
     )
   }

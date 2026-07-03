@@ -561,6 +561,83 @@ button:disabled {
   background: #fff;
 }
 
+.map-missing-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.map-missing-list strong {
+  color: #344054;
+  font-size: 13px;
+}
+
+.map-missing-list div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.map-missing-list span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: #f2f4f7;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.customer-map-pin {
+  position: relative;
+  width: 30px;
+  height: 42px;
+}
+
+.customer-map-pin::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 27px;
+  height: 27px;
+  transform: translateX(-50%) rotate(45deg);
+  border: 3px solid white;
+  border-radius: 50% 50% 50% 4px;
+  background: #162032;
+  box-shadow: 0 8px 18px rgba(23, 32, 50, .28);
+}
+
+.customer-map-pin span {
+  position: absolute;
+  left: 50%;
+  top: 9px;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: white;
+}
+
+.customer-map-pin.scheduled::before {
+  background: #1f6feb;
+}
+
+.customer-map-pin.done::before {
+  background: #16a34a;
+}
+
+.customer-map-pin.selected::before {
+  width: 31px;
+  height: 31px;
+  background: #f97316;
+  box-shadow: 0 0 0 7px rgba(249, 115, 22, .16), 0 10px 22px rgba(23, 32, 50, .32);
+}
+
 .user-location-pin {
   position: relative;
   width: 32px;
