@@ -325,6 +325,8 @@ function App() {
   const [noteCustomerId, setNoteCustomerId] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
+  const autoLocationPreparedRef = useRef<Set<string>>(new Set())
+  const geocodeActiveListRef = useRef<((options?: { automatic?: boolean }) => Promise<void>) | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
   const activeCustomers = useMemo(() => customers.filter((customer) => customer.customerListId === activeList?.id), [customers, activeList])
@@ -359,6 +361,7 @@ function App() {
   const historyCustomer = customers.find((customer) => customer.id === historyCustomerId) ?? null
   const noteCustomer = customers.find((customer) => customer.id === noteCustomerId) ?? null
   const geocodableCustomers = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
+  const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
 
   useEffect(() => {
@@ -484,6 +487,17 @@ function App() {
       showToast('마지막 백업 후 7일이 지났습니다. JSON 백업을 권장합니다')
     }
   }, [lastBackupAt])
+
+  useEffect(() => {
+    if (tab !== 'today' || todayMode !== 'map' || !activeList || !geocodableSignature || geocodeProgress.running) return
+    const autoKey = `${activeList.id}:${geocodableSignature}`
+    if (autoLocationPreparedRef.current.has(autoKey)) return
+    autoLocationPreparedRef.current.add(autoKey)
+    const timer = window.setTimeout(() => {
+      void geocodeActiveListRef.current?.({ automatic: true })
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [activeList, geocodableSignature, geocodeProgress.running, tab, todayMode])
 
   async function refresh() {
     const [nextLists, nextCustomers, nextVisits, nextContacts, nextSchedules, nextScheduleItems, nextTemplates] = await Promise.all([
@@ -787,16 +801,17 @@ function App() {
     showToast(`${customer?.name ?? '고객'}을 오늘 스케줄에서 삭제했습니다`)
   }
 
-  async function geocodeActiveList() {
+  async function geocodeActiveList(options: { automatic?: boolean } = {}) {
     if (geocodeProgress.running) return
     const targets = activeCustomers.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer))
     if (!targets.length) {
-      showToast('좌표변환이 필요한 고객이 없습니다')
+      if (!options.automatic) showToast('지도에 표시할 위치가 모두 준비되어 있습니다')
       return
     }
 
     let failed = 0
     setGeocodeProgress({ running: true, done: 0, total: targets.length, failed: 0, current: '' })
+    if (options.automatic) showToast('고객 주소를 지도에 표시하는 중입니다')
 
     for (let index = 0; index < targets.length; index += 1) {
       const customer = targets[index]
@@ -824,8 +839,10 @@ function App() {
 
     await refresh()
     setGeocodeProgress({ running: false, done: targets.length, total: targets.length, failed, current: '' })
-    showToast(failed ? `좌표변환 완료: ${targets.length - failed}명 성공, ${failed}명 실패` : `${targets.length}명 좌표변환 완료`)
+    showToast(failed ? `지도 표시 준비 완료: ${targets.length - failed}명 성공, ${failed}명 확인 필요` : `${targets.length}명 위치를 지도에 표시할 수 있습니다`)
   }
+
+  geocodeActiveListRef.current = geocodeActiveList
 
   async function sortScheduleByDistance() {
     const sorted = activeScheduleItems
@@ -1371,20 +1388,20 @@ function App() {
         </section>
 
         <section className="panel form-panel">
-          <PanelTitle title="주소 좌표변환" meta={`좌표 확보 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
-          <p className="backup-note">거리순과 지도 핀을 정확히 쓰기 위해 주소를 좌표로 변환해 저장합니다. OpenStreetMap Nominatim 정책에 맞춰 1초에 1명씩 천천히 처리합니다.</p>
+          <PanelTitle title="지도 위치 표시" meta={`표시 가능 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
+          <p className="backup-note">고객 주소를 지도 핀으로 표시할 수 있게 준비합니다. 많은 주소를 한 번에 처리하면 지도 서비스가 막을 수 있어 1초에 1명씩 천천히 확인합니다.</p>
           {geocodeProgress.running && (
             <div className="geocode-progress">
               <div>
                 <strong>{geocodeProgress.done}/{geocodeProgress.total}</strong>
-                <span>{geocodeProgress.current ? `${geocodeProgress.current} 변환 중` : '주소 변환 중'}</span>
+                <span>{geocodeProgress.current ? `${geocodeProgress.current} 위치 확인 중` : '위치 확인 중'}</span>
               </div>
               <progress value={geocodeProgress.done} max={geocodeProgress.total} />
             </div>
           )}
           <button className="secondary full" type="button" disabled={geocodeProgress.running || geocodableCustomers.length === 0} onClick={() => void geocodeActiveList()}>
             <Navigation size={18} />
-            {geocodeProgress.running ? '좌표변환 중' : `좌표변환 시작 (${geocodableCustomers.length}명)`}
+            {geocodeProgress.running ? '위치 확인 중' : `고객 위치 지도에 표시 (${geocodableCustomers.length}명)`}
           </button>
         </section>
 
@@ -1523,12 +1540,14 @@ function App() {
 
   function renderMap(list: Customer[]) {
     const mapList = list.filter(hasTrustedCoordinates)
-    const selected = selectedCustomer ?? mapList[0]
+    const selected = selectedCustomer && hasTrustedCoordinates(selectedCustomer) ? selectedCustomer : mapList[0]
     const path = mapList.map((customer) => [customer.latitude!, customer.longitude!] as [number, number])
+    const pendingLocationCount = list.filter((customer) => customer.address.trim() && !hasTrustedCoordinates(customer)).length
+    const missingAddressCount = list.filter((customer) => !customer.address.trim() && !hasTrustedCoordinates(customer)).length
     return (
       <>
         <section className="panel">
-          <PanelTitle title="오늘 지도" meta="완료 고객 제외" />
+          <PanelTitle title="오늘 지도" meta={`${mapList.length}/${list.length}명 표시`} />
           <div className="map-frame">
             <button className="map-overlay-location" type="button" onClick={requestLocation}>
               <Navigation size={18} />
@@ -1536,6 +1555,7 @@ function App() {
             </button>
             <MapContainer center={selected?.latitude && selected?.longitude ? [selected.latitude, selected.longitude] : location} zoom={13} scrollWheelZoom={false}>
               <MapFocus location={location} tick={mapFocusTick} />
+              <MapFitToCustomers points={path} />
               <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
               {hasUserLocation && (
                 <Marker position={location} icon={userLocationIcon}>
@@ -1556,6 +1576,29 @@ function App() {
               ))}
             </MapContainer>
           </div>
+          {geocodeProgress.running && (
+            <div className="map-location-notice">
+              <strong>고객 주소를 지도에 표시하는 중입니다</strong>
+              <span>{geocodeProgress.done}/{geocodeProgress.total}명 확인 · {geocodeProgress.current || '주소 확인 중'}</span>
+              <progress value={geocodeProgress.done} max={geocodeProgress.total} />
+            </div>
+          )}
+          {!geocodeProgress.running && pendingLocationCount > 0 && (
+            <div className="map-location-notice">
+              <strong>{pendingLocationCount}명의 위치가 아직 지도에 표시되지 않았습니다</strong>
+              <span>고객 주소를 확인해서 지도 핀으로 표시합니다. 한 번 준비되면 다음 실행 때도 저장된 위치를 사용합니다.</span>
+              <button className="secondary full" type="button" onClick={() => void geocodeActiveList()}>
+                <Navigation size={18} />
+                고객 위치 지도에 표시
+              </button>
+            </div>
+          )}
+          {!geocodeProgress.running && missingAddressCount > 0 && (
+            <div className="map-location-notice muted">
+              <strong>{missingAddressCount}명은 주소가 없어 지도에 표시할 수 없습니다</strong>
+              <span>고객 수정에서 주소를 입력하면 지도 표시 대상에 포함됩니다.</span>
+            </div>
+          )}
         </section>
         {selected && <HeroCustomer customer={selected} badge="지도 선택" />}
       </>
@@ -1650,6 +1693,25 @@ function MapFocus({ location, tick }: { location: [number, number]; tick: number
       map.flyTo(location, Math.max(map.getZoom(), 15), { duration: 0.7 })
     }
   }, [location, map, tick])
+  return null
+}
+
+function MapFitToCustomers({ points }: { points: [number, number][] }) {
+  const map = useMap()
+  const lastSignatureRef = useRef('')
+
+  useEffect(() => {
+    const signature = points.map(([latitude, longitude]) => `${latitude.toFixed(6)},${longitude.toFixed(6)}`).join('|')
+    if (signature === lastSignatureRef.current) return
+    lastSignatureRef.current = signature
+    if (!points.length) return
+    if (points.length === 1) {
+      map.setView(points[0], Math.max(map.getZoom(), 15), { animate: true })
+      return
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [36, 36], maxZoom: 15, animate: true })
+  }, [map, points])
+
   return null
 }
 
