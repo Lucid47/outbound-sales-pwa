@@ -36,6 +36,10 @@ import './App.css'
 type TabKey = 'today' | 'customers' | 'import' | 'logs' | 'settings'
 type TodayMode = 'schedule' | 'nearest' | 'region' | 'map'
 type ListFilterKey = 'open' | 'done' | 'all'
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
 
 type ParsedCsv = {
   headers: string[]
@@ -46,6 +50,7 @@ type ParsedCsv = {
 type FieldKey = 'name' | 'phoneNumber' | 'address' | 'notes' | 'latitude' | 'longitude'
 type FieldMapping = Record<FieldKey, number | null>
 
+const installGuideDismissedKey = 'installGuideDismissed'
 const defaultCenter: [number, number] = [37.5009, 127.0364]
 const userLocationIcon = L.divIcon({
   className: 'user-location-pin',
@@ -232,6 +237,15 @@ function formatTime(value: string) {
   }).format(new Date(value))
 }
 
+function isPwaStandalone() {
+  const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean }
+  return window.matchMedia('(display-mode: standalone)').matches || Boolean(navigatorWithStandalone.standalone)
+}
+
+function isIosDevice() {
+  return /iPhone|iPad|iPod/i.test(window.navigator.userAgent)
+}
+
 function App() {
   const [tab, setTab] = useState<TabKey>('today')
   const [todayMode, setTodayMode] = useState<TodayMode>('schedule')
@@ -257,6 +271,9 @@ function App() {
   const [messageCustomerId, setMessageCustomerId] = useState<string | null>(null)
   const [mapFocusTick, setMapFocusTick] = useState(0)
   const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
+  const [isStandalone, setIsStandalone] = useState(() => isPwaStandalone())
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [showInstallGuide, setShowInstallGuide] = useState(false)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
@@ -337,6 +354,46 @@ function App() {
       }
     }
     void requestPersistentStorage()
+  }, [])
+
+  useEffect(() => {
+    const displayMode = window.matchMedia('(display-mode: standalone)')
+    const legacyDisplayMode = displayMode as MediaQueryList & {
+      addListener?: (listener: () => void) => void
+      removeListener?: (listener: () => void) => void
+    }
+    const syncStandalone = () => setIsStandalone(isPwaStandalone())
+    const shouldShowGuide = () => !isPwaStandalone() && localStorage.getItem(installGuideDismissedKey) !== 'true'
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as BeforeInstallPromptEvent)
+      if (shouldShowGuide()) setShowInstallGuide(true)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', syncStandalone)
+    if (typeof displayMode.addEventListener === 'function') {
+      displayMode.addEventListener('change', syncStandalone)
+    } else {
+      legacyDisplayMode.addListener?.(syncStandalone)
+    }
+
+    const timer = window.setTimeout(() => {
+      syncStandalone()
+      if (shouldShowGuide()) setShowInstallGuide(true)
+    }, 900)
+
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', syncStandalone)
+      if (typeof displayMode.removeEventListener === 'function') {
+        displayMode.removeEventListener('change', syncStandalone)
+      } else {
+        legacyDisplayMode.removeListener?.(syncStandalone)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -755,6 +812,27 @@ function App() {
     showToast(`${list.name} 고객리스트를 삭제했습니다`)
   }
 
+  function dismissInstallGuide() {
+    localStorage.setItem(installGuideDismissedKey, 'true')
+    setShowInstallGuide(false)
+  }
+
+  async function installPwa() {
+    if (!installPrompt) {
+      setShowInstallGuide(true)
+      return
+    }
+    await installPrompt.prompt()
+    const choice = await installPrompt.userChoice
+    setInstallPrompt(null)
+    if (choice.outcome === 'accepted') {
+      localStorage.setItem(installGuideDismissedKey, 'true')
+      setShowInstallGuide(false)
+      setIsStandalone(true)
+      showToast('홈화면 앱 설치가 시작되었습니다')
+    }
+  }
+
   function renderListSummary(list: CustomerList) {
     const listCustomers = customers.filter((customer) => customer.customerListId === list.id)
     const open = listCustomers.filter((customer) => customer.status === 'open').length
@@ -797,9 +875,38 @@ function App() {
       </nav>
 
       {messageCustomerId && renderMessageSheet()}
+      {showInstallGuide && renderInstallGuide()}
       {toast && <div className="toast">{toast}</div>}
     </main>
   )
+
+  function renderInstallGuide() {
+    const isIos = isIosDevice()
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={dismissInstallGuide}>
+        <section className="install-sheet" role="dialog" aria-label="홈화면 추가 안내" onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="install-title">
+            <img src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" />
+            <div>
+              <h2>홈화면에 추가</h2>
+              <span>영업도우미</span>
+            </div>
+          </div>
+          <p>{isIos ? 'Safari 공유 버튼을 누른 뒤 홈 화면에 추가를 선택하세요.' : '설치하면 브라우저 주소창 없이 앱처럼 실행됩니다.'}</p>
+          <div className="install-actions">
+            {installPrompt && (
+              <button className="primary full" type="button" onClick={() => void installPwa()}>
+                <Download size={18} />
+                앱 설치
+              </button>
+            )}
+            <button className="secondary full" type="button" onClick={dismissInstallGuide}>닫기</button>
+          </div>
+        </section>
+      </div>
+    )
+  }
 
   function renderMessageSheet() {
     const customer = customers.find((entry) => entry.id === messageCustomerId)
@@ -1017,6 +1124,22 @@ function App() {
   function renderSettings() {
     return (
       <>
+        <section className="panel form-panel">
+          <PanelTitle title="앱 설치" meta={isStandalone ? '홈화면 실행 중' : '웹 실행 중'} />
+          <div className="install-inline">
+            <img src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" />
+            <div>
+              <strong>영업도우미</strong>
+              <span>{isStandalone ? '현재 홈화면 앱 모드로 실행 중입니다.' : '홈화면에 추가하면 앱처럼 사용할 수 있습니다.'}</span>
+            </div>
+          </div>
+          {!isStandalone && (
+            <button className="secondary full" type="button" onClick={() => { localStorage.removeItem(installGuideDismissedKey); setShowInstallGuide(true) }}>
+              <Download size={18} />
+              홈화면 추가 안내
+            </button>
+          )}
+        </section>
         <section className="panel form-panel">
           <PanelTitle title="문자 템플릿" meta={`${templates.length}개`} />
           <div className="list-stack">

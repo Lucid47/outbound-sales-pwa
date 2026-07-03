@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.svg'],
+      includeAssets: ['favicon.svg', 'favicon-64.png', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: '아웃바운드 영업 도우미',
         short_name: '영업도우미',
@@ -20,12 +20,27 @@ export default defineConfig({
         orientation: 'portrait',
         scope: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
         start_url: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
+        id: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
+        lang: 'ko',
+        categories: ['business', 'productivity'],
         icons: [
           {
-            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/pwa-icon.svg' : '/pwa-icon.svg',
+            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/pwa-192.png' : '/pwa-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/pwa-512.png' : '/pwa-512.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/pwa-512.png' : '/pwa-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
           },
         ],
       },
