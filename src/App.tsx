@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet'
 import { useMap } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet'
+import L from 'leaflet'
 import {
   CalendarCheck,
   Check,
@@ -45,6 +46,13 @@ type FieldKey = 'name' | 'phoneNumber' | 'address' | 'notes'
 type FieldMapping = Record<FieldKey, number | null>
 
 const defaultCenter: [number, number] = [37.5009, 127.0364]
+const userLocationIcon = L.divIcon({
+  className: 'user-location-pin',
+  html: '<span></span>',
+  iconSize: [32, 44],
+  iconAnchor: [16, 44],
+  popupAnchor: [0, -42],
+})
 
 const aliases: Record<FieldKey, string[]> = {
   name: ['고객명', '고객 이름', '이름', '성명', '거래처명', '회사명', 'name', 'customer', 'customername'],
@@ -235,6 +243,7 @@ function App() {
   const [scheduleItems, setScheduleItems] = useState<VisitScheduleItem[]>([])
   const [templates, setTemplates] = useState<MessageTemplate[]>([])
   const [location, setLocation] = useState<[number, number]>(defaultCenter)
+  const [hasUserLocation, setHasUserLocation] = useState(false)
   const [toast, setToast] = useState('')
   const [csv, setCsv] = useState<ParsedCsv | null>(null)
   const [importCompany, setImportCompany] = useState('고객사 C')
@@ -387,6 +396,7 @@ function App() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setLocation([position.coords.latitude, position.coords.longitude])
+        setHasUserLocation(true)
         setMapFocusTick((value) => value + 1)
         showToast('현재 위치를 반영했습니다')
       },
@@ -704,10 +714,6 @@ function App() {
   return (
     <main className="sales-app">
       <header className="app-header">
-        <div>
-          <p className="eyebrow">PWA</p>
-          <h1>영업도우미</h1>
-        </div>
         <button className="icon-button" type="button" onClick={() => setTab('settings')} aria-label="설정">
           <Settings size={22} />
         </button>
@@ -788,11 +794,6 @@ function App() {
             </button>
           ))}
         </div>
-        <button className="secondary full location-button" type="button" onClick={requestLocation}>
-          <Navigation size={18} />
-          현재 위치 반영
-        </button>
-
         <section className="metric-grid">
           <Metric value={remainingCustomers.length} label="남은 고객" />
           <Metric value={activeVisits.length} label="방문 로그" />
@@ -988,20 +989,20 @@ function App() {
     return (
       <>
         <section className="panel">
-          <div className="map-title-row">
-            <PanelTitle title="오늘 지도" meta="완료 고객 제외" />
-            <button className="secondary map-location" type="button" onClick={requestLocation}>
+          <PanelTitle title="오늘 지도" meta="완료 고객 제외" />
+          <div className="map-frame">
+            <button className="map-overlay-location" type="button" onClick={requestLocation}>
               <Navigation size={18} />
               내 위치
             </button>
-          </div>
-          <div className="map-frame">
             <MapContainer center={selected?.latitude && selected?.longitude ? [selected.latitude, selected.longitude] : location} zoom={13} scrollWheelZoom={false}>
               <MapFocus location={location} tick={mapFocusTick} />
               <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <CircleMarker center={location} radius={9} pathOptions={{ color: '#1f6feb', fillColor: '#1f6feb', fillOpacity: 0.8 }}>
-                <Popup>현재 위치</Popup>
-              </CircleMarker>
+              {hasUserLocation && (
+                <Marker position={location} icon={userLocationIcon}>
+                  <Popup>내 위치</Popup>
+                </Marker>
+              )}
               {path.length > 1 && <Polyline positions={path} pathOptions={{ color: '#1f6feb', weight: 4, dashArray: '8 8' }} />}
               {mapList.map((customer, index) => (
                 <CircleMarker

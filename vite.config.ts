@@ -4,7 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales-pwa/' : '/',
+  base: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
   plugins: [
     react(),
     VitePWA({
@@ -18,11 +18,11 @@ export default defineConfig({
         background_color: '#f5f7fb',
         display: 'standalone',
         orientation: 'portrait',
-        scope: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales-pwa/' : '/',
-        start_url: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales-pwa/' : '/',
+        scope: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
+        start_url: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/' : '/',
         icons: [
           {
-            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales-pwa/pwa-icon.svg' : '/pwa-icon.svg',
+            src: process.env.DEPLOY_TARGET === 'github-pages' ? '/outbound-sales/pwa-icon.svg' : '/pwa-icon.svg',
             sizes: '512x512',
             type: 'image/svg+xml',
             purpose: 'any maskable',
