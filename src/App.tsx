@@ -101,13 +101,7 @@ const sampleSchedules: VisitSchedule[] = [
   makeSchedule('schedule-b', 'list-b', '고객사 B 오늘 방문'),
 ]
 
-const sampleScheduleItems: VisitScheduleItem[] = [
-  makeScheduleItem('si-1', 'schedule-a', 'list-a', 'c-1', 1),
-  makeScheduleItem('si-2', 'schedule-a', 'list-a', 'c-2', 2),
-  makeScheduleItem('si-3', 'schedule-a', 'list-a', 'c-4', 3),
-  makeScheduleItem('si-4', 'schedule-b', 'list-b', 'c-6', 1),
-  makeScheduleItem('si-5', 'schedule-b', 'list-b', 'c-7', 2),
-]
+const sampleScheduleItems: VisitScheduleItem[] = []
 
 const sampleVisitLogs: VisitLog[] = [
   {
@@ -155,10 +149,6 @@ function makeCustomer(
 function makeSchedule(id: string, customerListId: string, title: string): VisitSchedule {
   const now = new Date().toISOString()
   return { id, customerListId, title, date: todayKey(), createdAt: now, updatedAt: now }
-}
-
-function makeScheduleItem(id: string, scheduleId: string, customerListId: string, customerId: string, orderIndex: number): VisitScheduleItem {
-  return { id, scheduleId, customerListId, customerId, orderIndex, status: 'pending' }
 }
 
 function makeTemplate(id: string, title: string, body: string, isDefault = false): MessageTemplate {
@@ -308,10 +298,12 @@ function App() {
           await appDb.customerLists.bulkAdd(sampleLists)
           await appDb.customers.bulkAdd(sampleCustomers)
           await appDb.visitSchedules.bulkAdd(sampleSchedules)
-          await appDb.visitScheduleItems.bulkAdd(sampleScheduleItems)
+          if (sampleScheduleItems.length) await appDb.visitScheduleItems.bulkAdd(sampleScheduleItems)
           await appDb.visitLogs.bulkAdd(sampleVisitLogs)
           await appDb.messageTemplates.bulkAdd(defaultTemplates)
         })
+      } else {
+        await Promise.all(['si-1', 'si-2', 'si-3', 'si-4', 'si-5'].map((id) => appDb.visitScheduleItems.delete(id)))
       }
       const [nextLists, nextCustomers, nextVisits, nextContacts, nextSchedules, nextScheduleItems, nextTemplates] = await Promise.all([
         appDb.customerLists.orderBy('importedAt').reverse().toArray(),
@@ -512,36 +504,19 @@ function App() {
     const goalX = customer.longitude
     const goalY = customer.latitude
     const tmapUrl = `tmap://route?goalx=${goalX}&goaly=${goalY}&goalname=${goalName}`
-    const fallbackUrl = `https://maps.apple.com/?daddr=${goalY},${goalX}&q=${goalName}&dirflg=d`
-    openExternalWithFallback(tmapUrl, fallbackUrl)
+    openExternalApp(tmapUrl)
   }
 
   function openTmapSearch(customer: Customer) {
     const destination = customer.address.trim() || customer.name.trim()
     const encodedDestination = encodeURIComponent(destination)
     const tmapUrl = `tmap://?search=${encodedDestination}`
-    const fallbackUrl = `https://www.tmap.co.kr/tmap2/mobile/search.jsp?name=${encodedDestination}`
     showToast('정확한 좌표가 없어 티맵에서 주소를 검색합니다')
-    openExternalWithFallback(tmapUrl, fallbackUrl)
+    openExternalApp(tmapUrl)
   }
 
-  function openExternalWithFallback(url: string, fallbackUrl: string) {
-    let pageHidden = false
-
-    const handleVisibility = () => {
-      if (document.hidden) {
-        pageHidden = true
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibility, { once: true })
+  function openExternalApp(url: string) {
     window.location.href = url
-    window.setTimeout(() => {
-      document.removeEventListener('visibilitychange', handleVisibility)
-      if (!pageHidden && document.visibilityState === 'visible') {
-        window.location.href = fallbackUrl
-      }
-    }, 1400)
   }
 
   function fillTemplate(templateBody: string, customer: Customer) {
@@ -625,19 +600,10 @@ function App() {
       createdAt: now,
       updatedAt: now,
     }
-    const items = nextCustomers.slice(0, 3).map((customer, index) => ({
-      id: makeId('schedule-item'),
-      scheduleId: schedule.id,
-      customerListId: listId,
-      customerId: customer.id,
-      orderIndex: index + 1,
-      status: 'pending' as const,
-    }))
     await appDb.transaction('rw', appDb.customerLists, appDb.customers, appDb.visitSchedules, appDb.visitScheduleItems, async () => {
       await appDb.customerLists.add(list)
       await appDb.customers.bulkAdd(nextCustomers)
       await appDb.visitSchedules.add(schedule)
-      if (items.length) await appDb.visitScheduleItems.bulkAdd(items)
     })
     setActiveListId(listId)
     setTab('customers')
@@ -669,6 +635,16 @@ function App() {
     })
     await refresh()
     showToast(`${customer.name} 고객을 오늘 스케줄에 추가했습니다`)
+  }
+
+  async function removeScheduleItem(item: VisitScheduleItem, customer?: Customer) {
+    const remainingItems = activeScheduleItems.filter((entry) => entry.id !== item.id)
+    await appDb.transaction('rw', appDb.visitScheduleItems, async () => {
+      await appDb.visitScheduleItems.delete(item.id)
+      await Promise.all(remainingItems.map((entry, index) => appDb.visitScheduleItems.update(entry.id, { orderIndex: index + 1 })))
+    })
+    await refresh()
+    showToast(`${customer?.name ?? '고객'}을 오늘 스케줄에서 삭제했습니다`)
   }
 
   async function sortScheduleByDistance() {
@@ -938,6 +914,9 @@ function App() {
                     <strong>{customer.name}</strong>
                     <small>{customer.region} · {item.status}</small>
                   </div>
+                  <button className="danger-icon" type="button" aria-label={`${customer.name} 스케줄 삭제`} onClick={() => void removeScheduleItem(item, customer)}>
+                    <Trash2 size={20} />
+                  </button>
                 </div>
               )
             })}
