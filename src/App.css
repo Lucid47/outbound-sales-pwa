@@ -358,11 +358,21 @@ button {
 
 .list-card {
   min-height: 82px;
-  border: 1px solid #e5eaf2;
+  display: grid;
+  grid-template-columns: 1fr 48px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+}
+
+.list-card > button:first-child {
+  min-width: 0;
+  border: 0;
   display: grid;
   gap: 4px;
-  padding: 12px;
+  padding: 2px;
   text-align: left;
+  background: transparent;
   color: #162032;
 }
 
@@ -374,6 +384,17 @@ button {
 .list-card small {
   color: #344054;
   font-size: 12px;
+}
+
+.danger-icon {
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #ffecec;
+  color: #c03535;
 }
 
 .schedule-row {

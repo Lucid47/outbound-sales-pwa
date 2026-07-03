@@ -17,6 +17,7 @@ import {
   Route,
   Search,
   Settings,
+  Trash2,
   Upload,
 } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
@@ -355,6 +356,8 @@ function App() {
   useEffect(() => {
     if (activeListId) {
       localStorage.setItem('activeListId', activeListId)
+    } else {
+      localStorage.removeItem('activeListId')
     }
   }, [activeListId])
 
@@ -388,7 +391,11 @@ function App() {
     setSchedules(nextSchedules)
     setScheduleItems(nextScheduleItems)
     setTemplates(nextTemplates)
-    if (!activeListId && nextLists[0]) setActiveListId(nextLists[0].id)
+    if (!activeListId && nextLists[0]) {
+      setActiveListId(nextLists[0].id)
+    } else if (activeListId && !nextLists.some((list) => list.id === activeListId)) {
+      setActiveListId(nextLists[0]?.id ?? '')
+    }
   }
 
   function customerDistance(customer: Customer) {
@@ -743,6 +750,35 @@ function App() {
     showToast('백업을 복원했습니다')
   }
 
+  async function deleteCustomerList(list: CustomerList) {
+    const summary = renderListSummary(list)
+    const confirmed = window.confirm(
+      `${list.name} 고객리스트를 삭제할까요?\n\n고객 ${summary.total}명, 방문 로그 ${summary.visits}건, 문자 로그 ${summary.messages}건, 오늘 스케줄이 함께 삭제됩니다.`,
+    )
+    if (!confirmed) return
+
+    const remainingLists = customerLists.filter((entry) => entry.id !== list.id)
+    await appDb.transaction('rw', [appDb.customerLists, appDb.customers, appDb.visitLogs, appDb.contactLogs, appDb.visitSchedules, appDb.visitScheduleItems], async () => {
+      await Promise.all([
+        appDb.visitScheduleItems.where('customerListId').equals(list.id).delete(),
+        appDb.visitSchedules.where('customerListId').equals(list.id).delete(),
+        appDb.contactLogs.where('customerListId').equals(list.id).delete(),
+        appDb.visitLogs.where('customerListId').equals(list.id).delete(),
+        appDb.customers.where('customerListId').equals(list.id).delete(),
+        appDb.customerLists.delete(list.id),
+      ])
+    })
+
+    if (activeListId === list.id) {
+      setActiveListId(remainingLists[0]?.id ?? '')
+    }
+    if (activeCustomers.some((customer) => customer.id === selectedCustomerId)) {
+      setSelectedCustomerId('')
+    }
+    await refresh()
+    showToast(`${list.name} 고객리스트를 삭제했습니다`)
+  }
+
   function renderListSummary(list: CustomerList) {
     const listCustomers = customers.filter((customer) => customer.customerListId === list.id)
     const open = listCustomers.filter((customer) => customer.status === 'open').length
@@ -874,11 +910,16 @@ function App() {
             {customerLists.map((list) => {
               const summary = renderListSummary(list)
               return (
-                <button className={`list-card ${list.id === activeListId ? 'selected' : ''}`} key={list.id} type="button" onClick={() => setActiveListId(list.id)}>
-                  <strong>{list.name}</strong>
-                  <span>{list.companyName} · {list.sourceFileName}</span>
-                  <small>총 {summary.total}명 · 미방문 {summary.open}명 · 방문 {summary.visits}건 · 문자 {summary.messages}건</small>
-                </button>
+                <article className={`list-card ${list.id === activeListId ? 'selected' : ''}`} key={list.id}>
+                  <button type="button" onClick={() => setActiveListId(list.id)}>
+                    <strong>{list.name}</strong>
+                    <span>{list.companyName} · {list.sourceFileName}</span>
+                    <small>총 {summary.total}명 · 미방문 {summary.open}명 · 방문 {summary.visits}건 · 문자 {summary.messages}건</small>
+                  </button>
+                  <button className="danger-icon" type="button" aria-label={`${list.name} 삭제`} onClick={() => void deleteCustomerList(list)}>
+                    <Trash2 size={20} />
+                  </button>
+                </article>
               )
             })}
           </div>
