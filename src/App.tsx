@@ -58,6 +58,11 @@ type CustomerForm = {
   notes: string
 }
 
+type MetricSheet = {
+  title: string
+  customers: Customer[]
+}
+
 type ParsedCsv = {
   headers: string[]
   rows: string[][]
@@ -566,6 +571,7 @@ function App() {
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null)
   const [noteCustomerId, setNoteCustomerId] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
+  const [metricSheet, setMetricSheet] = useState<MetricSheet | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const autoLocationPreparedRef = useRef<Set<string>>(new Set())
   const geocodeActiveListRef = useRef<((options?: { automatic?: boolean }) => Promise<void>) | null>(null)
@@ -573,7 +579,6 @@ function App() {
   const activeList = customerLists.find((list) => list.id === activeListId) ?? customerLists[0]
   const activeCustomers = useMemo(() => customers.filter((customer) => customer.customerListId === activeList?.id), [customers, activeList])
   const activeVisits = useMemo(() => visitLogs.filter((log) => log.customerListId === activeList?.id), [visitLogs, activeList])
-  const activeContacts = useMemo(() => contactLogs.filter((log) => log.customerListId === activeList?.id), [contactLogs, activeList])
   const activeSchedule = schedules.find((schedule) => schedule.customerListId === activeList?.id && schedule.date === todayKey())
   const activeScheduleItems = scheduleItems
     .filter((item) => item.customerListId === activeList?.id && item.scheduleId === activeSchedule?.id)
@@ -602,6 +607,8 @@ function App() {
   const selectedCustomer = activeCustomers.find((customer) => customer.id === selectedCustomerId) ?? currentCustomer ?? nearestCustomers[0]
   const historyCustomer = customers.find((customer) => customer.id === historyCustomerId) ?? null
   const noteCustomer = customers.find((customer) => customer.id === noteCustomerId) ?? null
+  const touchedCustomers = activeCustomers.filter((customer) => customerHistory(customer).length > 0)
+  const doneCustomers = activeCustomers.filter((customer) => customer.status === 'done')
   const geocodableCustomers = activeCustomers.filter(needsMapLocationRefresh)
   const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
@@ -1488,6 +1495,7 @@ function App() {
       {messageCustomerId && renderMessageSheet()}
       {historyCustomer && renderHistorySheet(historyCustomer)}
       {noteCustomer && renderNoteSheet(noteCustomer)}
+      {metricSheet && renderMetricSheet(metricSheet)}
       {editingCustomerId && renderCustomerEditor()}
       {showInstallGuide && renderInstallGuide()}
       {toast && <div className="toast">{toast}</div>}
@@ -1579,6 +1587,38 @@ function App() {
     )
   }
 
+  function renderMetricSheet(sheet: MetricSheet) {
+    return (
+      <div className="sheet-backdrop" role="presentation" onClick={() => setMetricSheet(null)}>
+        <section className="message-sheet" role="dialog" aria-label={sheet.title} onClick={(event) => event.stopPropagation()}>
+          <div className="sheet-handle" />
+          <div className="panel-title">
+            <div>
+              <h2>{sheet.title}</h2>
+              <span>{sheet.customers.length}명</span>
+            </div>
+            <button className="sheet-close" type="button" onClick={() => setMetricSheet(null)}>닫기</button>
+          </div>
+          <div className="metric-customer-list">
+            {sheet.customers.length ? sheet.customers.map((customer) => (
+              <button
+                type="button"
+                key={customer.id}
+                onClick={() => {
+                  setMetricSheet(null)
+                  setHistoryCustomerId(customer.id)
+                }}
+              >
+                <strong>{customer.name}</strong>
+                <span>{customer.address || '주소 없음'}</span>
+              </button>
+            )) : <EmptyState text="표시할 고객이 없습니다." />}
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   function renderInstallGuide() {
     const isIos = isIosDevice()
     return (
@@ -1652,9 +1692,9 @@ function App() {
           ))}
         </div>
         <section className="metric-grid">
-          <Metric value={remainingCustomers.length} label="남은 고객" />
-          <Metric value={activeContacts.length + activeVisits.length} label="터치 이력" />
-          <Metric value={activeCustomers.filter((customer) => customer.status === 'done').length} label="완료 고객" />
+          <Metric value={remainingCustomers.length} label="남은 고객" onClick={() => setMetricSheet({ title: '남은 고객', customers: remainingCustomers })} />
+          <Metric value={touchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: touchedCustomers })} />
+          <Metric value={doneCustomers.length} label="완료 고객" onClick={() => setMetricSheet({ title: '완료 고객', customers: doneCustomers })} />
         </section>
 
         {todayMode === 'region' && renderRegionGroups()}
@@ -1812,14 +1852,12 @@ function App() {
   }
 
   function renderLogs() {
-    const doneCustomers = activeCustomers.filter((customer) => customer.status === 'done')
-    const touchedCustomers = activeCustomers.filter((customer) => customerHistory(customer).length > 0)
     return (
       <>
         <section className="metric-grid">
-          <Metric value={activeCustomers.length} label="전체 고객" />
-          <Metric value={touchedCustomers.length} label="터치 고객" />
-          <Metric value={doneCustomers.length} label="완료 고객" />
+          <Metric value={activeCustomers.length} label="전체 고객" onClick={() => setMetricSheet({ title: '전체 고객', customers: activeCustomers })} />
+          <Metric value={touchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: touchedCustomers })} />
+          <Metric value={doneCustomers.length} label="완료 고객" onClick={() => setMetricSheet({ title: '완료 고객', customers: doneCustomers })} />
         </section>
         <section className="panel">
           <PanelTitle title="고객별 히스토리" meta={activeList?.name ?? ''} />
@@ -2080,7 +2118,9 @@ function App() {
           <button className="secondary" type="button" onClick={() => openEditCustomerSheet(customer)}>수정</button>
         </div>
         {showAdd && customer.status === 'open' && <button className="secondary full" type="button" onClick={() => addSelectedToSchedule(customer)}>스케줄 추가</button>}
-        {customer.status === 'done' && <button className="secondary full" type="button" onClick={() => void reopenCustomer(customer)}><RotateCcw size={18} /> 완료취소</button>}
+        {customer.status === 'done'
+          ? <button className="secondary full" type="button" onClick={() => void reopenCustomer(customer)}><RotateCcw size={18} /> 완료취소</button>
+          : <button className="complete full" type="button" onClick={() => void completeVisit(customer)}><Check size={18} /> 완료</button>}
       </article>
     )
   }
@@ -2134,12 +2174,12 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
   )
 }
 
-function Metric({ value, label }: { value: number; label: string }) {
+function Metric({ value, label, onClick }: { value: number; label: string; onClick?: () => void }) {
   return (
-    <article className="metric">
+    <button className="metric" type="button" onClick={onClick}>
       <strong>{value}</strong>
       <span>{label}</span>
-    </article>
+    </button>
   )
 }
 

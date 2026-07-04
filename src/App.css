@@ -161,6 +161,13 @@ button:disabled {
   border: 1px solid #d8dee8;
   border-radius: 8px;
   background: white;
+  color: #162032;
+  text-align: left;
+  cursor: pointer;
+}
+
+.metric:active {
+  transform: translateY(1px);
 }
 
 .metric strong {
@@ -172,6 +179,35 @@ button:disabled {
   color: #667085;
   font-size: 12px;
   font-weight: 850;
+}
+
+.metric-customer-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+}
+
+.metric-customer-list button {
+  min-height: 58px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  background: #f8fafc;
+  color: #162032;
+  text-align: left;
+}
+
+.metric-customer-list strong {
+  font-size: 15px;
+}
+
+.metric-customer-list span {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .panel,
