@@ -536,6 +536,67 @@ button:disabled {
   width: 100%;
 }
 
+.map-frame .leaflet-popup-content {
+  margin: 10px;
+}
+
+.map-frame .leaflet-popup-content-wrapper {
+  border-radius: 8px;
+}
+
+.map-popup-card {
+  width: 224px;
+  display: grid;
+  gap: 8px;
+}
+
+.map-popup-card strong {
+  display: block;
+  color: #162032;
+  font-size: 15px;
+}
+
+.map-popup-card span,
+.map-popup-card small {
+  display: block;
+  margin-top: 3px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.map-popup-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.map-popup-actions + .map-popup-actions {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.map-popup-actions button,
+.map-popup-full {
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  background: #eef2f7;
+  color: #162032;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.map-popup-full {
+  width: 100%;
+  background: #162032;
+  color: white;
+}
+
 .map-overlay-location {
   position: absolute;
   right: 12px;

@@ -1773,7 +1773,7 @@ function App() {
           <button className="secondary full" type="button" onClick={sortScheduleByDistance}>가까운 순 정렬</button>
         </section>
 
-        {renderMap(activeCustomers, { title: '고객 위치 지도', subtitle: '전체 고객 기준', showHero: false, showMissingList: true })}
+        {renderMap(activeCustomers, { title: '고객 위치 지도', subtitle: '전체 고객 기준', showMissingList: true })}
 
         <section className="panel form-panel">
           <PanelTitle title="지도 위치 표시" meta={`표시 가능 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
@@ -1946,7 +1946,7 @@ function App() {
 
   function renderMap(
     list: Customer[],
-    options: { title?: string; subtitle?: string; showHero?: boolean; showMissingList?: boolean } = {},
+    options: { title?: string; subtitle?: string; showMissingList?: boolean } = {},
   ) {
     const mapList = list.filter(hasTrustedCoordinates)
     const selected = selectedCustomer && hasTrustedCoordinates(selectedCustomer) ? selectedCustomer : mapList[0]
@@ -1955,79 +1955,99 @@ function App() {
     const missingAddressCount = list.filter((customer) => !isSearchableAddress(customer.address) && !hasTrustedCoordinates(customer)).length
     const missingCustomers = list.filter((customer) => !hasTrustedCoordinates(customer))
     const scheduledIds = new Set(activeScheduleItems.map((item) => item.customerId))
-    const showHero = options.showHero ?? true
     return (
-      <>
-        <section className="panel">
-          <PanelTitle title={options.title ?? '오늘 지도'} meta={`${mapList.length}/${list.length}명 표시`} />
-          {options.subtitle && <p className="backup-note">{options.subtitle}</p>}
-          <div className="map-frame">
-            <button className="map-overlay-location" type="button" onClick={requestLocation}>
-              <Navigation size={18} />
-              내 위치
-            </button>
-            <MapContainer center={selected?.latitude && selected?.longitude ? [selected.latitude, selected.longitude] : location} zoom={13} scrollWheelZoom={false}>
-              <MapFocus location={location} tick={mapFocusTick} />
-              <MapFitToCustomers points={path} />
-              <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              {hasUserLocation && (
-                <Marker position={location} icon={userLocationIcon}>
-                  <Popup>내 위치</Popup>
-                </Marker>
-              )}
-              {path.length > 1 && <Polyline positions={path} pathOptions={{ color: '#1f6feb', weight: 4, dashArray: '8 8' }} />}
-              {mapList.map((customer, index) => (
-                <Marker
-                  key={customer.id}
-                  position={[customer.latitude!, customer.longitude!]}
-                  icon={customerMapIcon(customer, customer.id === selectedCustomerId, scheduledIds.has(customer.id))}
-                  eventHandlers={{ click: () => setSelectedCustomerId(customer.id) }}
-                >
-                  <Popup>
-                    <strong>{index + 1}. {customer.name}</strong><br />
-                    {normalizeAddressForMapSearch(customer.address) || customer.address}<br />
-                    {scheduledIds.has(customer.id) ? '오늘 스케줄 포함' : '스케줄 미포함'}
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
+      <section className="panel">
+        <PanelTitle title={options.title ?? '오늘 지도'} meta={`${mapList.length}/${list.length}명 표시`} />
+        {options.subtitle && <p className="backup-note">{options.subtitle}</p>}
+        <div className="map-frame">
+          <button className="map-overlay-location" type="button" onClick={requestLocation}>
+            <Navigation size={18} />
+            내 위치
+          </button>
+          <MapContainer center={selected?.latitude && selected?.longitude ? [selected.latitude, selected.longitude] : location} zoom={13} scrollWheelZoom={false}>
+            <MapFocus location={location} tick={mapFocusTick} />
+            <MapFitToCustomers points={path} />
+            <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            {hasUserLocation && (
+              <Marker position={location} icon={userLocationIcon}>
+                <Popup>내 위치</Popup>
+              </Marker>
+            )}
+            {path.length > 1 && <Polyline positions={path} pathOptions={{ color: '#1f6feb', weight: 4, dashArray: '8 8' }} />}
+            {mapList.map((customer, index) => (
+              <Marker
+                key={customer.id}
+                position={[customer.latitude!, customer.longitude!]}
+                icon={customerMapIcon(customer, customer.id === selectedCustomerId, scheduledIds.has(customer.id))}
+                eventHandlers={{ click: () => setSelectedCustomerId(customer.id) }}
+              >
+                <Popup minWidth={220} closeButton>
+                  {renderMapPopupCard(customer, index + 1, scheduledIds.has(customer.id))}
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
+        </div>
+        {geocodeProgress.running && (
+          <div className="map-location-notice">
+            <strong>고객 주소를 지도에 표시하는 중입니다</strong>
+            <span>{geocodeProgress.done}/{geocodeProgress.total}명 확인 · {geocodeProgress.current || '주소 확인 중'}</span>
+            <progress value={geocodeProgress.done} max={geocodeProgress.total} />
           </div>
-          {geocodeProgress.running && (
-            <div className="map-location-notice">
-              <strong>고객 주소를 지도에 표시하는 중입니다</strong>
-              <span>{geocodeProgress.done}/{geocodeProgress.total}명 확인 · {geocodeProgress.current || '주소 확인 중'}</span>
-              <progress value={geocodeProgress.done} max={geocodeProgress.total} />
+        )}
+        {!geocodeProgress.running && pendingLocationCount > 0 && (
+          <div className="map-location-notice">
+            <strong>{pendingLocationCount}명의 위치가 아직 지도에 표시되지 않았습니다</strong>
+            <span>고객 주소를 확인해서 지도 핀으로 표시합니다. 한 번 준비되면 다음 실행 때도 저장된 위치를 사용합니다.</span>
+            <button className="secondary full" type="button" onClick={() => void geocodeActiveList()}>
+              <Navigation size={18} />
+              고객 위치 지도에 표시
+            </button>
+          </div>
+        )}
+        {!geocodeProgress.running && missingAddressCount > 0 && (
+          <div className="map-location-notice muted">
+            <strong>{missingAddressCount}명은 주소가 없어 지도에 표시할 수 없습니다</strong>
+            <span>고객 수정에서 주소를 입력하면 지도 표시 대상에 포함됩니다.</span>
+          </div>
+        )}
+        {options.showMissingList && missingCustomers.length > 0 && (
+          <div className="map-missing-list">
+            <strong>지도에 표시되지 않은 고객</strong>
+            <div>
+              {missingCustomers.map((customer) => (
+                <span key={customer.id}>{customer.name} · {mapMissingReason(customer)}</span>
+              ))}
             </div>
-          )}
-          {!geocodeProgress.running && pendingLocationCount > 0 && (
-            <div className="map-location-notice">
-              <strong>{pendingLocationCount}명의 위치가 아직 지도에 표시되지 않았습니다</strong>
-              <span>고객 주소를 확인해서 지도 핀으로 표시합니다. 한 번 준비되면 다음 실행 때도 저장된 위치를 사용합니다.</span>
-              <button className="secondary full" type="button" onClick={() => void geocodeActiveList()}>
-                <Navigation size={18} />
-                고객 위치 지도에 표시
-              </button>
-            </div>
-          )}
-          {!geocodeProgress.running && missingAddressCount > 0 && (
-            <div className="map-location-notice muted">
-              <strong>{missingAddressCount}명은 주소가 없어 지도에 표시할 수 없습니다</strong>
-              <span>고객 수정에서 주소를 입력하면 지도 표시 대상에 포함됩니다.</span>
-            </div>
-          )}
-          {options.showMissingList && missingCustomers.length > 0 && (
-            <div className="map-missing-list">
-              <strong>지도에 표시되지 않은 고객</strong>
-              <div>
-                {missingCustomers.map((customer) => (
-                  <span key={customer.id}>{customer.name} · {mapMissingReason(customer)}</span>
-                ))}
-              </div>
-            </div>
-          )}
-        </section>
-        {showHero && selected && <HeroCustomer customer={selected} badge="지도 선택" />}
-      </>
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  function renderMapPopupCard(customer: Customer, order: number, scheduled: boolean) {
+    return (
+      <div className="map-popup-card">
+        <div>
+          <strong>{order}. {customer.name}</strong>
+          <span>{normalizeAddressForMapSearch(customer.address) || customer.address}</span>
+          <small>{scheduled ? '오늘 스케줄 포함' : '스케줄 미포함'} · {statusLabel(customer.status)}</small>
+        </div>
+        <div className="map-popup-actions">
+          <button type="button" onClick={() => void callCustomer(customer)}><PhoneCall size={15} /> 전화</button>
+          <button type="button" onClick={() => setMessageCustomerId(customer.id)}><MessageSquareText size={15} /> 문자</button>
+          <button type="button" onClick={() => navigateCustomer(customer)}><Navigation size={15} /> 길찾기</button>
+        </div>
+        <div className="map-popup-actions">
+          <button type="button" onClick={() => setHistoryCustomerId(customer.id)}><CalendarCheck size={15} /> 이력</button>
+          {customer.status === 'done'
+            ? <button type="button" onClick={() => void reopenCustomer(customer)}><RotateCcw size={15} /> 완료취소</button>
+            : <button type="button" onClick={() => void completeVisit(customer)}><Check size={15} /> 완료</button>}
+        </div>
+        {!scheduled && customer.status === 'open' && (
+          <button className="map-popup-full" type="button" onClick={() => addSelectedToSchedule(customer)}>스케줄 추가</button>
+        )}
+      </div>
     )
   }
 
