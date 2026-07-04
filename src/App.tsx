@@ -84,12 +84,14 @@ const userLocationIcon = L.divIcon({
 
 function customerMapIcon(customer: Customer, selected: boolean, scheduled: boolean) {
   const statusClass = customer.status === 'done' ? 'done' : scheduled ? 'scheduled' : 'open'
+  const statusLabel = customer.status === 'done' ? '완료' : scheduled ? '예정' : '미완'
+  const shortName = customer.name.length > 7 ? `${customer.name.slice(0, 7)}…` : customer.name
   return L.divIcon({
-    className: `customer-map-pin ${statusClass} ${selected ? 'selected' : ''}`,
-    html: '<span></span>',
-    iconSize: [30, 42],
-    iconAnchor: [15, 42],
-    popupAnchor: [0, -40],
+    className: `customer-map-label ${statusClass} ${selected ? 'selected' : ''}`,
+    html: `<span class="name">${shortName}</span><span class="state">${statusLabel}</span>`,
+    iconSize: [92, 34],
+    iconAnchor: [46, 17],
+    popupAnchor: [0, -18],
   })
 }
 

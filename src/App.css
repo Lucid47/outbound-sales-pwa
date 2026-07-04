@@ -674,6 +674,68 @@ button:disabled {
   box-shadow: 0 0 0 7px rgba(249, 115, 22, .16), 0 10px 22px rgba(23, 32, 50, .32);
 }
 
+.customer-map-label {
+  width: 92px;
+  height: 34px;
+  border: 2px solid white;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  background: #162032;
+  color: white;
+  box-shadow: 0 8px 18px rgba(23, 32, 50, .28);
+  white-space: nowrap;
+}
+
+.customer-map-label::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  transform: translateX(-50%) rotate(45deg);
+  border-right: 2px solid white;
+  border-bottom: 2px solid white;
+  background: inherit;
+}
+
+.customer-map-label .name {
+  max-width: 48px;
+  overflow: hidden;
+  color: white;
+  font-size: 12px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+}
+
+.customer-map-label .state {
+  position: relative;
+  z-index: 1;
+  border-radius: 999px;
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, .18);
+  color: white;
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.customer-map-label.scheduled {
+  background: #1f6feb;
+}
+
+.customer-map-label.done {
+  background: #16a34a;
+}
+
+.customer-map-label.selected {
+  background: #f97316;
+  box-shadow: 0 0 0 7px rgba(249, 115, 22, .16), 0 10px 22px rgba(23, 32, 50, .32);
+}
+
 .user-location-pin {
   position: relative;
   width: 32px;
