@@ -1472,7 +1472,7 @@ function App() {
   return (
     <main className="sales-app">
       <header className="app-header">
-        {tab === 'customers' ? (
+        {tab === 'customers' || tab === 'logs' ? (
           <label className="header-search">
             <Search size={17} />
             <input
@@ -1877,17 +1877,22 @@ function App() {
   }
 
   function renderLogs() {
+    const searchActive = customerSearch.trim().length > 0
+    const logCustomers = searchActive ? searchedCustomers : activeCustomers
+    const logTouchedCustomers = logCustomers.filter((customer) => customerHistory(customer).length > 0)
+    const logDoneCustomers = logCustomers.filter((customer) => customer.status === 'done')
+
     return (
       <>
         <section className="metric-grid">
-          <Metric value={activeCustomers.length} label="전체 고객" onClick={() => setMetricSheet({ title: '전체 고객', customers: activeCustomers })} />
-          <Metric value={touchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: touchedCustomers })} />
-          <Metric value={doneCustomers.length} label="완료 고객" onClick={() => setMetricSheet({ title: '완료 고객', customers: doneCustomers })} />
+          <Metric value={logCustomers.length} label="전체 고객" onClick={() => setMetricSheet({ title: '전체 고객', customers: logCustomers })} />
+          <Metric value={logTouchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: logTouchedCustomers })} />
+          <Metric value={logDoneCustomers.length} label="완료 고객" onClick={() => setMetricSheet({ title: '완료 고객', customers: logDoneCustomers })} />
         </section>
         <section className="panel">
-          <PanelTitle title="고객별 히스토리" meta={activeList?.name ?? ''} />
+          <PanelTitle title="고객별 히스토리" meta={searchActive ? `${logCustomers.length}/${activeCustomers.length}명` : (activeList?.name ?? '')} />
           <div className="list-stack">
-            {activeCustomers.map((customer) => {
+            {logCustomers.length ? logCustomers.map((customer) => {
               const latest = latestHistory(customer)
               return (
                 <article className={`history-customer-row ${customer.status === 'done' ? 'highlight-done' : ''}`} key={customer.id} onClick={() => setHistoryCustomerId(customer.id)}>
@@ -1899,7 +1904,7 @@ function App() {
                   <span className={`pill ${customer.status === 'done' ? 'green' : latest ? 'orange' : ''}`}>{customer.status === 'done' ? '완료' : latest ? '진행중' : '미터치'}</span>
                 </article>
               )
-            })}
+            }) : <EmptyState text="검색 결과가 없습니다." />}
           </div>
         </section>
       </>
