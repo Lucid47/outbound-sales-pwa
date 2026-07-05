@@ -40,6 +40,7 @@ https://github.com/Lucid47/outbound-sales.git
 - [기능 명세](docs/feature-spec.md)
 - [배포와 운영](docs/deployment.md)
 - [Google Drive 동기화](docs/google-drive-sync.md)
+- [고객리스트 OCR 개발 계획](docs/customer-list-ocr.md)
 - [알려진 이슈와 해결 기록](docs/known-issues.md)
 - [로드맵](ROADMAP.md)
 - [변경 이력](CHANGELOG.md)

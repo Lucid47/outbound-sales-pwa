@@ -39,9 +39,12 @@
   - Vision 프레임워크 OCR
   - 네이티브 연락처/문자/지도 연동
 - OCR 기반 고객리스트 인식
-  - 출력물 사진 촬영
-  - 텍스트 추출
-  - 고객명/연락처/주소 후보 매핑
+  - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
+  - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원
+  - 사용자가 각 열 이름을 지정한 뒤 CSV 생성
+  - iPhone/iPad는 VisionKit 문서 스캔과 Apple Vision OCR로 확장 검토
+  - Android는 ML Kit Document Scanner와 Text Recognition v2로 확장 검토
+  - 상세 계획: `docs/customer-list-ocr.md`
 - 별도 서버 기반 다중 사용자 운영
   - 계정/권한 관리
   - 중앙 백업
