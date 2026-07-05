@@ -11,6 +11,7 @@ struct CLIOptions {
     var languages: [String] = ["ko-KR", "en-US"]
     var minConfidence: Float = 0
     var rowThreshold: Double?
+    var rotateDegrees: Int = 0
     var showHelp = false
 }
 
@@ -55,6 +56,7 @@ struct RunSummary: Codable {
     let csvHeaderSource: String
     let headerDetected: Bool
     let csvDataRowCount: Int
+    let rotateDegrees: Int
     let warnings: [String]
 }
 
@@ -105,6 +107,7 @@ func printHelp() {
       --languages "ko-KR,en-US"     OCR 언어. 기본값: ko-KR,en-US
       --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값: 0
       --row-threshold <number>      행 묶기 기준. 촘촘한 표는 0.01~0.018 권장
+      --rotate <0|90|180|270>       OCR 전 이미지를 시계방향 회전. 기본값: 0
       --help                        도움말
     """)
 }
@@ -159,6 +162,12 @@ func parseArguments(_ arguments: [String]) throws -> CLIOptions {
             }
             options.rowThreshold = value
             index += 2
+        case "--rotate":
+            guard index + 1 < arguments.count, let value = Int(arguments[index + 1]), [0, 90, 180, 270].contains(value) else {
+                throw CLIError.invalidOption("--rotate는 0, 90, 180, 270 중 하나만 사용할 수 있습니다.")
+            }
+            options.rotateDegrees = value
+            index += 2
         default:
             if argument.hasPrefix("-") {
                 throw CLIError.invalidOption("알 수 없는 옵션입니다: \(argument)")
@@ -188,6 +197,45 @@ func loadCGImage(from path: String) throws -> CGImage {
         throw CLIError.imageLoadFailed(path)
     }
     return image
+}
+
+func rotateImage(_ image: CGImage, degrees: Int) -> CGImage {
+    guard degrees != 0 else { return image }
+
+    let width = image.width
+    let height = image.height
+    let outputWidth = degrees == 90 || degrees == 270 ? height : width
+    let outputHeight = degrees == 90 || degrees == 270 ? width : height
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+    guard let context = CGContext(
+        data: nil,
+        width: outputWidth,
+        height: outputHeight,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        return image
+    }
+
+    switch degrees {
+    case 90:
+        context.translateBy(x: CGFloat(outputWidth), y: 0)
+        context.rotate(by: .pi / 2)
+    case 180:
+        context.translateBy(x: CGFloat(outputWidth), y: CGFloat(outputHeight))
+        context.rotate(by: .pi)
+    case 270:
+        context.translateBy(x: 0, y: CGFloat(outputHeight))
+        context.rotate(by: -.pi / 2)
+    default:
+        break
+    }
+
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage() ?? image
 }
 
 func recognizeText(in image: CGImage, languages: [String], minConfidence: Float) throws -> [RecognizedTextBox] {
@@ -505,7 +553,8 @@ func run() throws {
     let outputURL = options.outputDirectory.map { URL(fileURLWithPath: $0) } ?? defaultOutputDirectory(for: imagePath)
     try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
 
-    let image = try loadCGImage(from: imagePath)
+    let loadedImage = try loadCGImage(from: imagePath)
+    let image = rotateImage(loadedImage, degrees: options.rotateDegrees)
     let boxes = try recognizeText(in: image, languages: options.languages, minConfidence: options.minConfidence)
     let table = buildTable(from: boxes, rowThresholdOverride: options.rowThreshold)
     let csvResult = makeCSV(from: table, headers: options.headers, headerMode: options.headerMode)
@@ -528,6 +577,7 @@ func run() throws {
             csvHeaderSource: csvResult.headerSource,
             headerDetected: csvResult.headerDetected,
             csvDataRowCount: csvResult.dataRows.count,
+            rotateDegrees: options.rotateDegrees,
             warnings: table.warnings
         ),
         to: summaryURL
@@ -537,6 +587,9 @@ func run() throws {
     print("출력 폴더: \(outputURL.path)")
     print("텍스트 박스: \(boxes.count)")
     print("행: \(table.rows.count), 열: \(table.columnCount)")
+    if options.rotateDegrees != 0 {
+        print("회전 보정: \(options.rotateDegrees)도")
+    }
     print("CSV 헤더: \(csvResult.headerSource) · \(csvResult.reason)")
     if !table.warnings.isEmpty {
         print("경고:")

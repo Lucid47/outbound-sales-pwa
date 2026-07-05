@@ -30,6 +30,7 @@ tools/customer-list-ocr-cli/ocr-output/
 --languages "ko-KR,en-US"     OCR 언어. 기본값 ko-KR,en-US
 --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값 0
 --row-threshold <number>      행 묶기 기준. 촘촘한 표는 0.01~0.018 권장
+--rotate <0|90|180|270>       OCR 전 이미지를 시계방향 회전. 기본값 0
 --help                        도움말
 ```
 
@@ -48,6 +49,12 @@ OCR CLI는 열의 의미를 해석하지 않고 셀 값을 행/열 형태로 복
 
 ```bash
 swift run customer-list-ocr /path/to/customer-list.heic --row-threshold 0.012
+```
+
+이미지가 돌아가 있으면 `--rotate`로 OCR 전에 보정합니다.
+
+```bash
+swift run customer-list-ocr /path/to/customer-list.jpg --rotate 270 --row-threshold 0.012
 ```
 
 ## 개인정보 규칙
