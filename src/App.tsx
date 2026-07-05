@@ -721,12 +721,12 @@ function App() {
       const count = await appDb.customerLists.count()
       if (count === 0) {
         await appDb.transaction('rw', [appDb.customerLists, appDb.customers, appDb.visitSchedules, appDb.visitScheduleItems, appDb.visitLogs, appDb.messageTemplates], async () => {
-          await appDb.customerLists.bulkAdd(sampleLists)
-          await appDb.customers.bulkAdd(sampleCustomers)
-          await appDb.visitSchedules.bulkAdd(sampleSchedules)
-          if (sampleScheduleItems.length) await appDb.visitScheduleItems.bulkAdd(sampleScheduleItems)
-          await appDb.visitLogs.bulkAdd(sampleVisitLogs)
-          await appDb.messageTemplates.bulkAdd(defaultTemplates)
+          await appDb.customerLists.bulkPut(sampleLists)
+          await appDb.customers.bulkPut(sampleCustomers)
+          await appDb.visitSchedules.bulkPut(sampleSchedules)
+          if (sampleScheduleItems.length) await appDb.visitScheduleItems.bulkPut(sampleScheduleItems)
+          await appDb.visitLogs.bulkPut(sampleVisitLogs)
+          await appDb.messageTemplates.bulkPut(defaultTemplates)
         })
       } else {
         await Promise.all(['si-1', 'si-2', 'si-3', 'si-4', 'si-5'].map((id) => appDb.visitScheduleItems.delete(id)))
@@ -2261,7 +2261,7 @@ function App() {
     const missingCustomers = list.filter((customer) => !hasTrustedCoordinates(customer))
     const scheduledIds = new Set(activeScheduleItems.map((item) => item.customerId))
     return (
-      <section className="panel">
+      <section className="panel map-panel">
         <PanelTitle title={options.title ?? '오늘 지도'} meta={`${mapList.length}/${list.length}명 표시`} />
         {options.subtitle && <p className="backup-note">{options.subtitle}</p>}
         <div className="map-frame">

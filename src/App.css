@@ -1,5 +1,6 @@
 .sales-app {
-  width: min(480px, 100%);
+  --shell-max: 480px;
+  width: min(var(--shell-max), 100%);
   min-height: 100vh;
   margin: 0 auto;
   background: #f5f7fb;
@@ -1114,7 +1115,7 @@ textarea {
   left: 50%;
   bottom: 0;
   z-index: 20;
-  width: min(480px, 100%);
+  width: min(var(--shell-max), 100%);
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1290,6 +1291,7 @@ textarea {
   }
 
   .sales-app {
+    --shell-max: 920px;
     margin-top: 20px;
     margin-bottom: 20px;
     min-height: calc(100vh - 40px);
@@ -1297,5 +1299,114 @@ textarea {
     border-radius: 24px;
     overflow: hidden;
     box-shadow: 0 18px 45px rgba(23, 32, 50, .16);
+  }
+
+  .app-header {
+    min-height: 72px;
+    grid-template-columns: minmax(280px, 420px) auto;
+    justify-content: space-between;
+    padding: 12px 18px 10px;
+  }
+
+  .active-list {
+    margin: 16px 16px 0;
+    padding: 16px;
+  }
+
+  .content {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+    padding: 16px 16px 122px;
+  }
+
+  .content > .segmented,
+  .content > .metric-grid,
+  .content > .map-panel,
+  .content > .hero-card,
+  .content > .location-button {
+    grid-column: 1 / -1;
+  }
+
+  .panel,
+  .hero-card,
+  .metric-grid,
+  .location-button {
+    margin-bottom: 0;
+  }
+
+  .metric-grid {
+    gap: 12px;
+  }
+
+  .list-stack {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .map-frame {
+    height: min(58vh, 560px);
+  }
+
+  .map-popup-card {
+    width: 260px;
+  }
+
+  .message-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sheet-backdrop {
+    align-items: center;
+    padding: 24px;
+  }
+
+  .message-sheet,
+  .install-sheet {
+    width: min(720px, 100%);
+    max-height: min(86vh, 760px);
+    border-radius: 18px;
+    padding: 14px 18px 18px;
+  }
+
+  .tabbar {
+    bottom: 20px;
+    width: min(var(--shell-max), calc(100% - 32px));
+    padding: 8px;
+    border: 1px solid #d8dee8;
+    border-radius: 18px;
+    box-shadow: 0 14px 34px rgba(23, 32, 50, .16);
+  }
+
+  .toast {
+    bottom: 108px;
+    width: min(620px, calc(100% - 48px));
+  }
+}
+
+@media (min-width: 1120px) {
+  .sales-app {
+    --shell-max: 1180px;
+  }
+
+  .content {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .content > .segmented,
+  .content > .metric-grid,
+  .content > .map-panel,
+  .content > .hero-card,
+  .content > .location-button {
+    grid-column: 1 / -1;
+  }
+
+  .map-frame {
+    height: min(62vh, 640px);
+  }
+
+  .message-sheet,
+  .install-sheet {
+    width: min(760px, 100%);
   }
 }
