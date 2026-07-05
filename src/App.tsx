@@ -279,6 +279,10 @@ function hasDialablePhone(phoneNumber: string) {
   return cleanPhone(phoneNumber).replace(/\D/g, '').length >= 7
 }
 
+function smsUrlForPhone(phoneNumber: string) {
+  return `sms:${encodeURIComponent(cleanPhone(phoneNumber))}`
+}
+
 function parseCoordinate(value: string, kind: 'latitude' | 'longitude') {
   const normalized = value.trim().replace(',', '.')
   if (!normalized) return undefined
@@ -994,17 +998,15 @@ function App() {
   }
 
   function sendManualSms(customer: Customer) {
-    const phone = cleanPhone(customer.phoneNumber)
     if (!hasDialablePhone(customer.phoneNumber)) {
       showToast('연락처가 없어 문자앱을 열 수 없습니다. 고객 수정에서 연락처를 확인하세요')
       return
     }
     void addTouchLog(customer, 'manualSms', 'opened').then(refresh)
-    window.location.href = `sms:${phone}`
+    openExternalApp(smsUrlForPhone(customer.phoneNumber))
   }
 
   function sendTemplateSms(customer: Customer, template: MessageTemplate) {
-    const phone = cleanPhone(customer.phoneNumber)
     if (!hasDialablePhone(customer.phoneNumber)) {
       showToast('연락처가 없어 문자앱을 열 수 없습니다. 고객 수정에서 연락처를 확인하세요')
       return
@@ -1018,7 +1020,7 @@ function App() {
       showToast('본문 복사가 제한되었습니다. 템플릿 내용을 직접 복사하세요')
     }
     void addTouchLog(customer, 'templateSms', 'sentByUser', body, template.id).then(refresh)
-    window.location.href = `sms:${phone}`
+    openExternalApp(smsUrlForPhone(customer.phoneNumber))
   }
 
   function callCustomer(customer: Customer) {
@@ -1028,7 +1030,7 @@ function App() {
       return
     }
     void addTouchLog(customer, 'call', 'opened').then(refresh)
-    window.location.href = `tel:${phone}`
+    openExternalApp(`tel:${encodeURIComponent(phone)}`)
   }
 
   function navigateCustomer(customer: Customer) {
@@ -1079,7 +1081,13 @@ function App() {
   }
 
   function openExternalApp(url: string) {
-    window.location.href = url
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.target = '_self'
+    anchor.rel = 'noopener'
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
   }
 
   function fillTemplate(templateBody: string, customer: Customer) {
@@ -1979,13 +1987,13 @@ function App() {
             <button className="sheet-close" type="button" onClick={() => setMessageCustomerId(null)}>닫기</button>
           </div>
           <div className="message-options">
-            <button type="button" onClick={() => { setMessageCustomerId(null); void sendManualSms(customer) }}>
+            <button type="button" onClick={() => { sendManualSms(customer); setMessageCustomerId(null) }}>
               <MessageSquareText size={18} />
               사용자 문자보내기
               <small>본문 자동 입력 없이 문자 앱을 엽니다</small>
             </button>
             {templates.map((template) => (
-              <button type="button" key={template.id} onClick={() => { setMessageCustomerId(null); void sendTemplateSms(customer, template) }}>
+              <button type="button" key={template.id} onClick={() => { sendTemplateSms(customer, template); setMessageCustomerId(null) }}>
                 <Clipboard size={18} />
                 {template.title}
                 <small>{fillTemplate(template.body, customer)}</small>
@@ -2449,7 +2457,7 @@ function App() {
         </div>
         <div className="map-popup-actions">
           <button type="button" onClick={() => void callCustomer(customer)}><PhoneCall size={15} /> 전화</button>
-          <button type="button" onClick={() => setMessageCustomerId(customer.id)}><MessageSquareText size={15} /> 문자</button>
+          <button type="button" onClick={(event) => { event.stopPropagation(); setMessageCustomerId(customer.id) }}><MessageSquareText size={15} /> 문자</button>
           <button type="button" onClick={() => navigateCustomer(customer)}><Navigation size={15} /> 길찾기</button>
         </div>
         <div className="map-popup-actions">
@@ -2579,9 +2587,9 @@ function App() {
   function ActionGrid({ customer }: { customer: Customer }) {
     return (
       <div className="action-grid">
-        <button type="button" onClick={() => void callCustomer(customer)}><PhoneCall size={18} /> 전화</button>
-        <button type="button" onClick={() => setMessageCustomerId(customer.id)}><MessageSquareText size={18} /> 문자</button>
-        <button type="button" onClick={() => navigateCustomer(customer)}><Navigation size={18} /> 길찾기</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); void callCustomer(customer) }}><PhoneCall size={18} /> 전화</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); setMessageCustomerId(customer.id) }}><MessageSquareText size={18} /> 문자</button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); navigateCustomer(customer) }}><Navigation size={18} /> 길찾기</button>
       </div>
     )
   }
