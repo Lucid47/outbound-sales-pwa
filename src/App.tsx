@@ -10,6 +10,8 @@ import {
   Clipboard,
   Download,
   FileSpreadsheet,
+  LayoutGrid,
+  List,
   ListFilter,
   LogOut,
   MessageSquareText,
@@ -57,6 +59,7 @@ import './App.css'
 type TabKey = 'today' | 'customers' | 'import' | 'logs' | 'settings'
 type TodayMode = 'schedule' | 'nearest' | 'region' | 'map'
 type ListFilterKey = 'open' | 'done' | 'all' | 'age'
+type DisplayMode = 'cards' | 'list'
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
@@ -107,6 +110,7 @@ type GoogleDriveAccount = GoogleUserProfile & {
 const installGuideDismissedKey = 'installGuideDismissed'
 const lastDriveSyncAtKey = 'lastDriveSyncAt'
 const googleDriveAccountKey = 'googleDriveAccount'
+const displayModeKey = 'displayMode'
 const defaultCenter: [number, number] = [37.5009, 127.0364]
 const userLocationIcon = L.divIcon({
   className: 'user-location-pin',
@@ -556,6 +560,10 @@ function loadGoogleDriveAccount(): GoogleDriveAccount | null {
   }
 }
 
+function loadDisplayMode(): DisplayMode {
+  return localStorage.getItem(displayModeKey) === 'list' ? 'list' : 'cards'
+}
+
 function distanceKm(from: [number, number], to: [number, number]) {
   const radius = 6371
   const dLat = ((to[0] - from[0]) * Math.PI) / 180
@@ -673,6 +681,7 @@ function App() {
   const [noteCustomerId, setNoteCustomerId] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
   const [customerSearch, setCustomerSearch] = useState('')
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => loadDisplayMode())
   const [metricSheet, setMetricSheet] = useState<MetricSheet | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const autoLocationPreparedRef = useRef<Set<string>>(new Set())
@@ -715,6 +724,11 @@ function App() {
   const geocodableCustomers = activeCustomers.filter(needsMapLocationRefresh)
   const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
+
+  function changeDisplayMode(mode: DisplayMode) {
+    localStorage.setItem(displayModeKey, mode)
+    setDisplayMode(mode)
+  }
 
   useEffect(() => {
     async function seedAndLoadInitialData() {
@@ -2054,11 +2068,14 @@ function App() {
         </div>
 
         {showFlatCustomerList ? (
-          <section className="panel">
+          <section className="panel customer-list-panel">
             <PanelTitle title="고객 목록" meta={searchActive ? `${filtered.length}/${activeCustomers.length}명` : `${filtered.length}명`} />
-            <button className="primary full customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
+            <div className="list-toolbar">
+              {renderDisplayModeControl()}
+              <button className="primary customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
+            </div>
             {filtered.length ? (
-              <div className="list-stack">
+              <div className={`customer-collection ${displayMode === 'cards' ? 'view-grid' : 'view-list'}`}>
                 {filtered.map((customer) => (
                 <CustomerRow key={customer.id} customer={customer} showAdd />
                 ))}
@@ -2113,6 +2130,9 @@ function App() {
     const logCustomers = searchActive ? searchedCustomers : activeCustomers
     const logTouchedCustomers = logCustomers.filter((customer) => customerHistory(customer).length > 0)
     const logDoneCustomers = logCustomers.filter((customer) => customer.status === 'done')
+    const cumulativeHistory = logCustomers
+      .flatMap((customer) => customerHistory(customer).map((entry) => ({ ...entry, customer })))
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
 
     return (
       <>
@@ -2121,9 +2141,12 @@ function App() {
           <Metric value={logTouchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: logTouchedCustomers })} />
           <Metric value={logDoneCustomers.length} label="완료 고객" onClick={() => setMetricSheet({ title: '완료 고객', customers: logDoneCustomers })} />
         </section>
-        <section className="panel">
+        <section className="panel log-list-panel">
           <PanelTitle title="고객별 히스토리" meta={searchActive ? `${logCustomers.length}/${activeCustomers.length}명` : (activeList?.name ?? '')} />
-          <div className="list-stack">
+          <div className="list-toolbar">
+            {renderDisplayModeControl()}
+          </div>
+          <div className={`history-customer-list ${displayMode === 'cards' ? 'view-grid' : 'view-list'}`}>
             {logCustomers.length ? logCustomers.map((customer) => {
               const latest = latestHistory(customer)
               return (
@@ -2138,6 +2161,26 @@ function App() {
               )
             }) : <EmptyState text="검색 결과가 없습니다." />}
           </div>
+        </section>
+        <section className="panel log-list-panel">
+          <PanelTitle title="누적 터치/상담 히스토리" meta={`${cumulativeHistory.length}건`} />
+          {cumulativeHistory.length ? (
+            <div className={`history-event-list ${displayMode === 'cards' ? 'view-grid' : 'view-list'}`}>
+              {cumulativeHistory.map((entry) => (
+                <article className="history-event-row" key={entry.id} onClick={() => setHistoryCustomerId(entry.customer.id)}>
+                  <div>
+                    <span className={`pill ${entry.tone}`}>{entry.title}</span>
+                    <strong>{entry.customer.name}</strong>
+                    <small>{displayRegion(entry.customer)} · {formatTime(entry.at)}</small>
+                    <p>{entry.detail}</p>
+                  </div>
+                  <button className="secondary" type="button" onClick={(event) => { event.stopPropagation(); setHistoryCustomerId(entry.customer.id) }}>
+                    전체보기
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState text="아직 누적 히스토리가 없습니다." />}
         </section>
       </>
     )
@@ -2397,6 +2440,21 @@ function App() {
           </div>
         )) : <EmptyState text="검색 결과가 없습니다." />}
       </section>
+    )
+  }
+
+  function renderDisplayModeControl() {
+    return (
+      <div className="view-toggle" aria-label="표시 방식">
+        <button className={displayMode === 'cards' ? 'active' : ''} type="button" onClick={() => changeDisplayMode('cards')}>
+          <LayoutGrid size={17} />
+          카드
+        </button>
+        <button className={displayMode === 'list' ? 'active' : ''} type="button" onClick={() => changeDisplayMode('list')}>
+          <List size={17} />
+          목록
+        </button>
+      </div>
     )
   }
 
