@@ -109,6 +109,7 @@ type GoogleDriveAccount = GoogleUserProfile & {
 
 const installGuideDismissedKey = 'installGuideDismissed'
 const lastDriveSyncAtKey = 'lastDriveSyncAt'
+const lastLocalChangeAtKey = 'lastLocalChangeAt'
 const googleDriveAccountKey = 'googleDriveAccount'
 const displayModeKey = 'displayMode'
 const defaultCenter: [number, number] = [37.5009, 127.0364]
@@ -669,6 +670,7 @@ function App() {
   const [mapFocusTick, setMapFocusTick] = useState(0)
   const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
   const [lastDriveSyncAt, setLastDriveSyncAt] = useState<string>(() => localStorage.getItem(lastDriveSyncAtKey) ?? '')
+  const [lastLocalChangeAt, setLastLocalChangeAt] = useState<string>(() => localStorage.getItem(lastLocalChangeAtKey) ?? '')
   const [driveSyncBusy, setDriveSyncBusy] = useState(false)
   const [googleDriveAccount, setGoogleDriveAccount] = useState<GoogleDriveAccount | null>(() => loadGoogleDriveAccount())
   const [isStandalone, setIsStandalone] = useState(() => isPwaStandalone())
@@ -724,10 +726,17 @@ function App() {
   const geocodableCustomers = activeCustomers.filter(needsMapLocationRefresh)
   const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
+  const hasUnsyncedChanges = Boolean(lastLocalChangeAt && (!lastDriveSyncAt || lastLocalChangeAt > lastDriveSyncAt))
 
   function changeDisplayMode(mode: DisplayMode) {
     localStorage.setItem(displayModeKey, mode)
     setDisplayMode(mode)
+  }
+
+  function markLocalDataChanged() {
+    const now = new Date().toISOString()
+    localStorage.setItem(lastLocalChangeAtKey, now)
+    setLastLocalChangeAt(now)
   }
 
   useEffect(() => {
@@ -920,6 +929,7 @@ function App() {
       result,
       createdAt: new Date().toISOString(),
     })
+    markLocalDataChanged()
   }
 
   function requestLocation() {
@@ -957,6 +967,7 @@ function App() {
         await appDb.visitScheduleItems.update(item.id, { status: 'completed', completedAt: now })
       }
     })
+    markLocalDataChanged()
     await refresh()
     showToast(`${customer.name} 완료 처리가 저장되었습니다`)
   }
@@ -977,6 +988,7 @@ function App() {
       })
       await Promise.all(completedItems.map((item) => appDb.visitScheduleItems.update(item.id, { status: 'pending', completedAt: undefined })))
     })
+    markLocalDataChanged()
     await refresh()
     showToast(`${customer.name} 고객을 다시 활성화했습니다`)
   }
@@ -1167,6 +1179,7 @@ function App() {
     setImportCompany('')
     setImportListName('')
     setImportSourceFile('')
+    markLocalDataChanged()
     await refresh()
     showToast(`${nextCustomers.length}명 저장 완료`)
   }
@@ -1192,6 +1205,7 @@ function App() {
       orderIndex: maxOrder + 1,
       status: 'pending',
     })
+    markLocalDataChanged()
     await refresh()
     showToast(`${customer.name} 고객을 오늘 스케줄에 추가했습니다`)
   }
@@ -1202,6 +1216,7 @@ function App() {
       await appDb.visitScheduleItems.delete(item.id)
       await Promise.all(remainingItems.map((entry, index) => appDb.visitScheduleItems.update(entry.id, { orderIndex: index + 1 })))
     })
+    markLocalDataChanged()
     await refresh()
     showToast(`${customer?.name ?? '고객'}을 오늘 스케줄에서 삭제했습니다`)
   }
@@ -1262,6 +1277,7 @@ function App() {
       if (index < targetGroups.length - 1) await wait(1100)
     }
 
+    markLocalDataChanged()
     await refresh()
     setGeocodeProgress({ running: false, done: targetGroups.length, total: targetGroups.length, failed, current: '' })
     showToast(failed ? `지도 표시 준비 완료: ${targets.length - failed}명 성공, ${failed}명 확인 필요` : `${targets.length}명 위치를 지도에 표시할 수 있습니다`)
@@ -1275,6 +1291,7 @@ function App() {
       .filter((entry): entry is { item: VisitScheduleItem; customer: Customer } => Boolean(entry.customer))
       .sort((a, b) => customerDistance(a.customer) - customerDistance(b.customer))
     await Promise.all(sorted.map((entry, index) => appDb.visitScheduleItems.update(entry.item.id, { orderIndex: index + 1 })))
+    markLocalDataChanged()
     await refresh()
     showToast('오늘 스케줄을 가까운 순으로 정렬했습니다')
   }
@@ -1295,6 +1312,7 @@ function App() {
     })
     setNewTemplateTitle('')
     setNewTemplateBody('')
+    markLocalDataChanged()
     await refresh()
     showToast('문자 템플릿을 추가했습니다')
   }
@@ -1325,6 +1343,7 @@ function App() {
       updatedAt: new Date().toISOString(),
     })
     closeTemplateEditor()
+    markLocalDataChanged()
     await refresh()
     showToast('문자 템플릿을 수정했습니다')
   }
@@ -1332,6 +1351,7 @@ function App() {
   async function deleteTemplate(template: MessageTemplate) {
     await appDb.messageTemplates.delete(template.id)
     if (editingTemplateId === template.id) closeTemplateEditor()
+    markLocalDataChanged()
     await refresh()
     showToast(`${template.title} 템플릿을 삭제했습니다`)
   }
@@ -1367,11 +1387,11 @@ function App() {
 
   async function importBackup(file: File) {
     const payload = JSON.parse(await file.text())
-    await restoreBackupPayload(payload)
+    await restoreBackupPayload(payload, { markChanged: true })
     showToast('백업을 복원했습니다')
   }
 
-  async function restoreBackupPayload(payload: AppBackupPayload) {
+  async function restoreBackupPayload(payload: AppBackupPayload, options: { markChanged?: boolean } = {}) {
     await appDb.transaction('rw', [appDb.customerLists, appDb.customers, appDb.visitLogs, appDb.contactLogs, appDb.visitSchedules, appDb.visitScheduleItems, appDb.messageTemplates], async () => {
       await Promise.all([
         appDb.customerLists.clear(),
@@ -1391,6 +1411,7 @@ function App() {
       await appDb.messageTemplates.bulkAdd(payload.messageTemplates ?? defaultTemplates)
     })
     setActiveListId(payload.customerLists?.[0]?.id ?? '')
+    if (options.markChanged) markLocalDataChanged()
     await refresh()
   }
 
@@ -1407,7 +1428,7 @@ function App() {
     }
     setDriveSyncBusy(true)
     try {
-      const token = await requestGoogleDriveToken([googleProfileScope, driveAppDataScope], { prompt: 'consent' })
+      const token = await requestGoogleDriveToken([googleProfileScope, driveAppDataScope, driveFileScope], { prompt: 'consent' })
       const profile = await getGoogleUserProfile(token)
       const account = { ...profile, connectedAt: new Date().toISOString() }
       localStorage.setItem(googleDriveAccountKey, JSON.stringify(account))
@@ -1442,7 +1463,7 @@ function App() {
     if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
-      const token = await requestGoogleDriveToken([driveAppDataScope])
+      const token = await requestGoogleDriveToken([driveAppDataScope], { prompt: '' })
       const localPayload = await buildBackupPayload()
       const syncFile = await findAppDataSyncFile(token)
       if (!syncFile) {
@@ -1465,6 +1486,33 @@ function App() {
     }
   }
 
+  async function restoreFromGoogleDrive() {
+    if (!isGoogleDriveSyncConfigured()) {
+      showToast('Google Client ID 설정이 필요합니다')
+      return
+    }
+    if (!ensureGoogleDriveConnected()) return
+    const confirmed = window.confirm('현재 기기의 고객 데이터와 기록을 Google Drive 데이터로 교체할까요? 새 기기에서 처음 불러올 때 사용하는 기능입니다.')
+    if (!confirmed) return
+    setDriveSyncBusy(true)
+    try {
+      const token = await requestGoogleDriveToken([driveAppDataScope], { prompt: '' })
+      const syncFile = await findAppDataSyncFile(token)
+      if (!syncFile) {
+        showToast('Google Drive에 동기화 파일이 없습니다')
+        return
+      }
+      const remotePayload = await downloadDriveJson<AppBackupPayload>(token, syncFile.id)
+      await restoreBackupPayload(remotePayload)
+      markDriveSyncComplete()
+      showToast('Google Drive 데이터를 이 기기에 불러왔습니다')
+    } catch {
+      showToast('Google Drive 데이터 가져오기에 실패했습니다. 로그인 권한과 설정을 확인하세요')
+    } finally {
+      setDriveSyncBusy(false)
+    }
+  }
+
   async function saveGoogleDriveSnapshot() {
     if (!isGoogleDriveSyncConfigured()) {
       showToast('Google Client ID 설정이 필요합니다')
@@ -1473,7 +1521,7 @@ function App() {
     if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
-      const token = await requestGoogleDriveToken([driveAppDataScope])
+      const token = await requestGoogleDriveToken([driveAppDataScope], { prompt: '' })
       const payload = await buildBackupPayload()
       const syncFile = await findAppDataSyncFile(token)
       if (syncFile) {
@@ -1498,7 +1546,7 @@ function App() {
     if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
-      const token = await requestGoogleDriveToken([driveFileScope])
+      const token = await requestGoogleDriveToken([driveFileScope], { prompt: '' })
       await createVisibleDriveBackup(token, await buildBackupPayload() as Record<string, unknown>)
       const now = new Date().toISOString()
       localStorage.setItem('lastBackupAt', now)
@@ -1536,6 +1584,7 @@ function App() {
     if (activeCustomers.some((customer) => customer.id === selectedCustomerId)) {
       setSelectedCustomerId('')
     }
+    markLocalDataChanged()
     await refresh()
     showToast(`${list.name} 고객리스트를 삭제했습니다`)
   }
@@ -1609,6 +1658,7 @@ function App() {
       showToast(`${name} 고객 정보를 수정했습니다`)
     }
     closeCustomerSheet()
+    markLocalDataChanged()
     await refresh()
   }
 
@@ -2262,6 +2312,18 @@ function App() {
               </button>
             </div>
           )}
+          {isGoogleDriveSyncConfigured() && googleDriveAccount && (
+            <div className={`sync-status ${hasUnsyncedChanges ? 'needs-sync' : 'synced'}`}>
+              <strong>{hasUnsyncedChanges ? '동기화 필요' : 'Drive 동기화 준비됨'}</strong>
+              <span>
+                {hasUnsyncedChanges
+                  ? `마지막 로컬 변경: ${formatTime(lastLocalChangeAt)}`
+                  : lastDriveSyncAt
+                    ? `마지막 동기화: ${formatTime(lastDriveSyncAt)}`
+                    : '아직 Drive 동기화 기록이 없습니다.'}
+              </span>
+            </div>
+          )}
           {isGoogleDriveSyncConfigured() && !googleDriveAccount && (
             <button className="primary full" type="button" onClick={() => void connectGoogleDrive()} disabled={driveSyncBusy}>
               <UserRound size={18} />
@@ -2271,6 +2333,10 @@ function App() {
           <button className="primary full" type="button" onClick={() => void syncGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
             <RefreshCw size={18} />
             Drive와 동기화
+          </button>
+          <button className="secondary full" type="button" onClick={() => void restoreFromGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
+            <Download size={18} />
+            Drive 데이터를 이 기기에 가져오기
           </button>
           <button className="secondary full" type="button" onClick={() => void saveGoogleDriveSnapshot()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
             <Cloud size={18} />

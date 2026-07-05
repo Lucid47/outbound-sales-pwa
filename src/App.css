@@ -1152,6 +1152,38 @@ textarea {
   padding: 0 10px;
 }
 
+.sync-status {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.sync-status strong {
+  font-size: 14px;
+}
+
+.sync-status span {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sync-status.needs-sync {
+  border-color: #ffd9b8;
+  background: #fff8f1;
+}
+
+.sync-status.needs-sync strong {
+  color: #b65c17;
+}
+
+.sync-status.synced strong {
+  color: #168a53;
+}
+
 .geocode-progress {
   display: grid;
   gap: 8px;

@@ -145,12 +145,16 @@ https://lucid47.github.io/outbound-sales/
 - Google 계정으로 연결 버튼 추가
 - 연결된 Google 계정 이름과 이메일 표시
 - 이 기기에서 Google Drive 연결 해제 지원
+- 로컬 변경사항 발생 시 `동기화 필요` 상태 표시
+- 마지막 로컬 변경 시각과 마지막 Drive 동기화 시각 표시
 - Google Identity Services로 Drive API access token 요청
 - `drive.appdata` 권한으로 앱 전용 숨김 동기화 파일 생성
 - `outbound-sales-sync.json` 파일에 현재 앱 데이터를 저장
 - Drive 데이터와 로컬 데이터를 ID 기준으로 병합
 - 같은 ID가 양쪽에 있으면 더 최근 수정 시각의 데이터를 우선
 - 로그성 데이터는 ID 기준으로 합쳐 데이터 유실을 줄임
+- 새 기기에서 사용할 수 있는 `Drive 데이터를 이 기기에 가져오기` 기능 추가
+- 가져오기 기능은 병합하지 않고 Drive 데이터를 로컬에 교체 복원함
 - `drive.file` 권한으로 사용자가 볼 수 있는 JSON 백업 파일 생성
 
 아직 1단계에서 제한되는 것:
@@ -283,6 +287,25 @@ VITE_GOOGLE_CLIENT_ID
 → Drive와 동기화
 ```
 
+새 기기에서 권장 흐름:
+
+```text
+설정
+→ Google 계정으로 연결
+→ Drive 데이터를 이 기기에 가져오기
+→ 기존 Drive 데이터로 로컬 데이터 교체
+→ 이후 Drive와 동기화 사용
+```
+
+일상 사용 흐름:
+
+```text
+전화/문자/메모/완료/고객수정 등 로컬 변경 발생
+→ 설정에 동기화 필요 표시
+→ Drive와 동기화
+→ 마지막 동기화 시간 갱신
+```
+
 ## 배포
 
 현재 배포 방식은 GitHub Pages입니다.
@@ -337,6 +360,8 @@ GitHub Pages 배포 단계에서 간헐적으로 `Deployment failed, try again l
 - 고객/기록 탭에 카드형/목록형 표시 전환 추가
 - 고객 카드와 기록 카드가 브라우저 폭에 따라 `n*m` 그리드로 자동 배치되도록 개선
 - 기록 탭에 누적 터치/상담 히스토리 목록 추가
+- Google Drive 동기화 필요 상태와 마지막 변경/동기화 시각 표시 추가
+- 새 기기용 Google Drive 데이터 가져오기 기능 추가
 
 ## 최근 확인된 문제와 개선
 
