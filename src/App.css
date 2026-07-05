@@ -9,43 +9,35 @@
   padding-bottom: 128px;
 }
 
-.app-header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  min-height: 62px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 14px 6px;
-  background: rgba(255, 255, 255, .94);
-  border-bottom: 1px solid #d8dee8;
-  backdrop-filter: blur(18px);
-}
-
-.header-search {
+.customer-search {
   min-width: 0;
-  min-height: 46px;
+  min-height: 52px;
   border: 1px solid #d8dee8;
   border-radius: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 11px;
-  background: #f8fafc;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 0 14px;
+  background: white;
+  box-shadow: 0 8px 20px rgba(23, 32, 50, .05);
   color: #667085;
 }
 
-.header-search input {
-  min-height: 42px;
+.customer-search input {
+  min-height: 48px;
   border: 0;
   padding: 0;
   background: transparent;
   color: #162032;
+  font-weight: 850;
 }
 
-.header-search input:focus {
+.customer-search input::placeholder {
+  color: #98a2b3;
+}
+
+.customer-search input:focus {
   outline: none;
 }
 
@@ -1247,7 +1239,7 @@ textarea {
   width: min(var(--shell-max), 100%);
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 2px;
   padding: 8px 10px 16px;
   background: rgba(255, 255, 255, .96);
@@ -1430,13 +1422,6 @@ textarea {
     box-shadow: 0 18px 45px rgba(23, 32, 50, .16);
   }
 
-  .app-header {
-    min-height: 72px;
-    grid-template-columns: minmax(280px, 420px) auto;
-    justify-content: space-between;
-    padding: 12px 18px 10px;
-  }
-
   .active-list {
     margin: 16px 16px 0;
     padding: 16px;
@@ -1453,6 +1438,7 @@ textarea {
   .content > .segmented,
   .content > .metric-grid,
   .content > .map-panel,
+  .content > .customer-search,
   .content > .customer-list-panel,
   .content > .log-list-panel,
   .content > .hero-card,
@@ -1555,6 +1541,7 @@ textarea {
   .content > .segmented,
   .content > .metric-grid,
   .content > .map-panel,
+  .content > .customer-search,
   .content > .customer-list-panel,
   .content > .log-list-panel,
   .content > .hero-card,

@@ -1775,23 +1775,6 @@ function App() {
 
   return (
     <main className="sales-app">
-      <header className="app-header">
-        {tab === 'customers' || tab === 'logs' ? (
-          <label className="header-search">
-            <Search size={17} />
-            <input
-              value={customerSearch}
-              onChange={(event) => setCustomerSearch(event.target.value)}
-              placeholder="이름·전화·주소 검색"
-              type="search"
-            />
-          </label>
-        ) : <span />}
-        <button className="icon-button" type="button" onClick={() => setTab('settings')} aria-label="설정">
-          <Settings size={22} />
-        </button>
-      </header>
-
       {activeList && (
         <section className="active-list">
           <div>
@@ -1815,6 +1798,7 @@ function App() {
         <TabButton active={tab === 'customers'} icon={<ListFilter size={21} />} label="고객" onClick={() => setTab('customers')} />
         <TabButton active={tab === 'import'} icon={<Upload size={21} />} label="가져오기" onClick={() => setTab('import')} />
         <TabButton active={tab === 'logs'} icon={<CalendarCheck size={21} />} label="기록" onClick={() => setTab('logs')} />
+        <TabButton active={tab === 'settings'} icon={<Settings size={21} />} label="설정" onClick={() => setTab('settings')} />
       </nav>
 
       {messageCustomerId && renderMessageSheet()}
@@ -2125,6 +2109,8 @@ function App() {
           <button className={listFilter === 'age' ? 'active' : ''} type="button" onClick={() => setListFilter('age')}>나이별</button>
         </div>
 
+        {renderCustomerSearch()}
+
         {showFlatCustomerList ? (
           <section className="panel customer-list-panel">
             <PanelTitle title="고객 목록" meta={searchActive ? `${filtered.length}/${activeCustomers.length}명` : `${filtered.length}명`} />
@@ -2142,6 +2128,20 @@ function App() {
           </section>
         ) : renderAgeGroups(customerScope)}
       </>
+    )
+  }
+
+  function renderCustomerSearch() {
+    return (
+      <label className="customer-search">
+        <Search size={18} />
+        <input
+          value={customerSearch}
+          onChange={(event) => setCustomerSearch(event.target.value)}
+          placeholder="이름·전화번호·주소 검색"
+          type="search"
+        />
+      </label>
     )
   }
 
@@ -2194,6 +2194,7 @@ function App() {
 
     return (
       <>
+        {renderCustomerSearch()}
         <section className="metric-grid">
           <Metric value={logCustomers.length} label="전체 고객" onClick={() => setMetricSheet({ title: '전체 고객', customers: logCustomers })} />
           <Metric value={logTouchedCustomers.length} label="터치 고객" onClick={() => setMetricSheet({ title: '터치 고객', customers: logTouchedCustomers })} />
