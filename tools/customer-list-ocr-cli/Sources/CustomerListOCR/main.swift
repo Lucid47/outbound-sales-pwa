@@ -7,9 +7,15 @@ struct CLIOptions {
     var imagePath: String?
     var outputDirectory: String?
     var headers: [String] = []
+    var headerMode: HeaderMode = .auto
     var languages: [String] = ["ko-KR", "en-US"]
     var minConfidence: Float = 0
     var showHelp = false
+}
+
+enum HeaderMode: String, Codable {
+    case auto
+    case none
 }
 
 struct RecognizedTextBox: Codable {
@@ -45,7 +51,26 @@ struct RunSummary: Codable {
     let boxCount: Int
     let rowCount: Int
     let columnCount: Int
+    let csvHeaderSource: String
+    let headerDetected: Bool
+    let csvDataRowCount: Int
     let warnings: [String]
+}
+
+struct CSVBuildResult {
+    let csv: String
+    let headers: [String]
+    let dataRows: [[OcrCell]]
+    let headerSource: String
+    let headerDetected: Bool
+    let reason: String
+}
+
+struct RowProfile {
+    let filledRatio: Double
+    let digitRatio: Double
+    let averageLength: Double
+    let longCellRatio: Double
 }
 
 enum CLIError: Error, CustomStringConvertible {
@@ -75,6 +100,7 @@ func printHelp() {
     Options:
       --out-dir <path>              출력 폴더. 기본값: ./ocr-output/<image-name>-<timestamp>
       --headers "열A,열B,열C"          CSV 헤더. 생략하면 열1, 열2... 사용
+      --header-mode <auto|none>     첫 행 헤더 자동 판정. 기본값: auto
       --languages "ko-KR,en-US"     OCR 언어. 기본값: ko-KR,en-US
       --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값: 0
       --help                        도움말
@@ -103,6 +129,15 @@ func parseArguments(_ arguments: [String]) throws -> CLIOptions {
                 throw CLIError.invalidOption("--headers 값이 필요합니다.")
             }
             options.headers = splitCSVLikeArgument(arguments[index + 1])
+            index += 2
+        case "--header-mode":
+            guard index + 1 < arguments.count else {
+                throw CLIError.invalidOption("--header-mode 값이 필요합니다.")
+            }
+            guard let mode = HeaderMode(rawValue: arguments[index + 1]) else {
+                throw CLIError.invalidOption("--header-mode는 auto 또는 none만 사용할 수 있습니다.")
+            }
+            options.headerMode = mode
             index += 2
         case "--languages":
             guard index + 1 < arguments.count else {
@@ -297,19 +332,132 @@ func weightedConfidence(for boxes: [RecognizedTextBox]) -> Double? {
     return weighted.reduce(0) { $0 + $1.0 * $1.1 } / totalWeight
 }
 
-func makeCSV(from table: OcrTable, headers providedHeaders: [String]) -> String {
+func makeCSV(from table: OcrTable, headers providedHeaders: [String], headerMode: HeaderMode) -> CSVBuildResult {
     let columnCount = max(table.columnCount, providedHeaders.count)
-    let headers = (0..<columnCount).map { index in
-        index < providedHeaders.count ? providedHeaders[index] : "열\(index + 1)"
+
+    let headers: [String]
+    let dataRows: [[OcrCell]]
+    let headerSource: String
+    let headerDetected: Bool
+    let reason: String
+
+    if !providedHeaders.isEmpty {
+        headers = makeHeaders(columnCount: columnCount, providedHeaders: providedHeaders)
+        dataRows = table.rows
+        headerSource = "manual"
+        headerDetected = false
+        reason = "--headers 옵션을 사용했습니다."
+    } else if headerMode == .auto {
+        let decision = detectHeaderRow(in: table)
+        if decision.isHeader, let firstRow = table.rows.first {
+            headers = makeHeaders(columnCount: columnCount, providedHeaders: firstRow.map(\.text))
+            dataRows = Array(table.rows.dropFirst())
+            headerSource = "detected-first-row"
+            headerDetected = true
+            reason = decision.reason
+        } else {
+            headers = makeHeaders(columnCount: columnCount, providedHeaders: [])
+            dataRows = table.rows
+            headerSource = "generated"
+            headerDetected = false
+            reason = decision.reason
+        }
+    } else {
+        headers = makeHeaders(columnCount: columnCount, providedHeaders: [])
+        dataRows = table.rows
+        headerSource = "generated"
+        headerDetected = false
+        reason = "--header-mode none을 사용했습니다."
     }
+
     let headerRow = headers.map(escapeCSVField).joined(separator: ",")
-    let dataRows = table.rows.map { row in
+    let csvDataRows = dataRows.map { row in
         (0..<columnCount).map { index in
             let value = index < row.count ? row[index].text : ""
             return escapeCSVField(value)
         }.joined(separator: ",")
     }
-    return ([headerRow] + dataRows).joined(separator: "\n") + "\n"
+
+    return CSVBuildResult(
+        csv: ([headerRow] + csvDataRows).joined(separator: "\n") + "\n",
+        headers: headers,
+        dataRows: dataRows,
+        headerSource: headerSource,
+        headerDetected: headerDetected,
+        reason: reason
+    )
+}
+
+func makeHeaders(columnCount: Int, providedHeaders: [String]) -> [String] {
+    (0..<columnCount).map { index in
+        let header = index < providedHeaders.count
+            ? providedHeaders[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
+        return header.isEmpty ? "열\(index + 1)" : header
+    }
+}
+
+func detectHeaderRow(in table: OcrTable) -> (isHeader: Bool, reason: String) {
+    guard table.rows.count >= 3, table.columnCount > 0 else {
+        return (false, "행이 부족해 첫 행 헤더를 자동 판정하지 않았습니다.")
+    }
+
+    let firstProfile = profile(for: table.rows[0], columnCount: table.columnCount)
+    let restProfiles = table.rows.dropFirst().map { profile(for: $0, columnCount: table.columnCount) }
+    let restAverage = averageProfile(restProfiles)
+    let restDistances = restProfiles.map { profileDistance($0, restAverage) }
+    let firstDistance = profileDistance(firstProfile, restAverage)
+    let restDistance = average(restDistances)
+
+    let digitSignal = firstProfile.digitRatio < 0.18 && restAverage.digitRatio - firstProfile.digitRatio > 0.18
+    let lengthSignal = firstProfile.averageLength < restAverage.averageLength * 0.65 && restAverage.longCellRatio > firstProfile.longCellRatio + 0.15
+    let outlierSignal = firstDistance > max(0.34, restDistance * 2.2)
+    let enoughFilledCells = firstProfile.filledRatio >= min(0.6, max(0.25, restAverage.filledRatio * 0.55))
+
+    if enoughFilledCells && (digitSignal || lengthSignal || outlierSignal) {
+        return (true, String(format: "첫 행의 형태가 나머지 행과 다릅니다. distance=%.3f, rest=%.3f", firstDistance, restDistance))
+    }
+    return (false, String(format: "첫 행을 데이터로 유지했습니다. distance=%.3f, rest=%.3f", firstDistance, restDistance))
+}
+
+func profile(for row: [OcrCell], columnCount: Int) -> RowProfile {
+    let texts = row.map(\.text).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    let filledTexts = texts.filter { !$0.isEmpty }
+    let joined = filledTexts.joined(separator: "")
+    let digitCount = joined.filter(\.isNumber).count
+    let characterCount = joined.count
+    let averageLength = filledTexts.isEmpty ? 0 : Double(filledTexts.map(\.count).reduce(0, +)) / Double(filledTexts.count)
+    let longCellCount = filledTexts.filter { $0.count >= 14 }.count
+
+    return RowProfile(
+        filledRatio: columnCount == 0 ? 0 : Double(filledTexts.count) / Double(columnCount),
+        digitRatio: characterCount == 0 ? 0 : Double(digitCount) / Double(characterCount),
+        averageLength: averageLength,
+        longCellRatio: filledTexts.isEmpty ? 0 : Double(longCellCount) / Double(filledTexts.count)
+    )
+}
+
+func averageProfile(_ profiles: [RowProfile]) -> RowProfile {
+    guard !profiles.isEmpty else {
+        return RowProfile(filledRatio: 0, digitRatio: 0, averageLength: 0, longCellRatio: 0)
+    }
+    return RowProfile(
+        filledRatio: average(profiles.map(\.filledRatio)),
+        digitRatio: average(profiles.map(\.digitRatio)),
+        averageLength: average(profiles.map(\.averageLength)),
+        longCellRatio: average(profiles.map(\.longCellRatio))
+    )
+}
+
+func profileDistance(_ left: RowProfile, _ right: RowProfile) -> Double {
+    let lengthScale = 30.0
+    let values = [
+        left.filledRatio - right.filledRatio,
+        left.digitRatio - right.digitRatio,
+        (left.averageLength - right.averageLength) / lengthScale,
+        left.longCellRatio - right.longCellRatio
+    ]
+    return sqrt(values.map { $0 * $0 }.reduce(0, +))
 }
 
 func escapeCSVField(_ value: String) -> String {
@@ -352,7 +500,7 @@ func run() throws {
     let image = try loadCGImage(from: imagePath)
     let boxes = try recognizeText(in: image, languages: options.languages, minConfidence: options.minConfidence)
     let table = buildTable(from: boxes)
-    let csv = makeCSV(from: table, headers: options.headers)
+    let csvResult = makeCSV(from: table, headers: options.headers, headerMode: options.headerMode)
 
     let boxesURL = outputURL.appendingPathComponent("ocr-boxes.json")
     let tableURL = outputURL.appendingPathComponent("table.json")
@@ -361,7 +509,7 @@ func run() throws {
 
     try writeJSON(boxes, to: boxesURL)
     try writeJSON(table, to: tableURL)
-    try csv.write(to: csvURL, atomically: true, encoding: .utf8)
+    try csvResult.csv.write(to: csvURL, atomically: true, encoding: .utf8)
     try writeJSON(
         RunSummary(
             imagePath: imagePath,
@@ -369,6 +517,9 @@ func run() throws {
             boxCount: boxes.count,
             rowCount: table.rows.count,
             columnCount: table.columnCount,
+            csvHeaderSource: csvResult.headerSource,
+            headerDetected: csvResult.headerDetected,
+            csvDataRowCount: csvResult.dataRows.count,
             warnings: table.warnings
         ),
         to: summaryURL
@@ -378,6 +529,7 @@ func run() throws {
     print("출력 폴더: \(outputURL.path)")
     print("텍스트 박스: \(boxes.count)")
     print("행: \(table.rows.count), 열: \(table.columnCount)")
+    print("CSV 헤더: \(csvResult.headerSource) · \(csvResult.reason)")
     if !table.warnings.isEmpty {
         print("경고:")
         for warning in table.warnings {

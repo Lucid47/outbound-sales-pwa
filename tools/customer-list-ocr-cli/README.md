@@ -26,12 +26,22 @@ tools/customer-list-ocr-cli/ocr-output/
 ```text
 --out-dir <path>              출력 폴더
 --headers "열A,열B,열C"          CSV 헤더. 생략하면 열1, 열2... 사용
+--header-mode <auto|none>     첫 행 헤더 자동 판정. 기본값 auto
 --languages "ko-KR,en-US"     OCR 언어. 기본값 ko-KR,en-US
 --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값 0
 --help                        도움말
 ```
 
-`--headers`는 예시 필드에 고정되지 않습니다. 사용자가 원하는 임의의 열 이름을 순서대로 넣으면 되고, 생략하면 `열1`, `열2`처럼 자동 생성됩니다. OCR CLI는 열의 의미를 해석하지 않고 셀 값을 행/열 형태로 복원하는 데만 집중합니다.
+`--headers`는 예시 필드에 고정되지 않습니다. 사용자가 원하는 임의의 열 이름을 순서대로 넣으면 됩니다.
+
+헤더 처리 방식:
+
+- `--headers`를 지정하면 해당 값을 CSV 첫 행으로 사용합니다.
+- `--headers`를 생략하고 `--header-mode auto`이면 첫 행만 나머지 행과 형태가 다를 때 헤더로 인식합니다.
+- 첫 행이 데이터와 비슷하면 첫 행도 데이터로 유지하고 `열1`, `열2`처럼 자동 헤더를 만듭니다.
+- `--header-mode none`이면 첫 행 헤더 판정을 하지 않고 단순 OCR 변환 결과를 CSV로 만듭니다.
+
+OCR CLI는 열의 의미를 해석하지 않고 셀 값을 행/열 형태로 복원하는 데만 집중합니다.
 
 ## 개인정보 규칙
 
