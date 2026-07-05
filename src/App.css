@@ -13,14 +13,39 @@
   top: 0;
   z-index: 10;
   min-height: 62px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  justify-content: flex-end;
   gap: 12px;
   padding: 8px 14px 6px;
   background: rgba(255, 255, 255, .94);
   border-bottom: 1px solid #d8dee8;
   backdrop-filter: blur(18px);
+}
+
+.header-search {
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  background: #f8fafc;
+  color: #667085;
+}
+
+.header-search input {
+  min-height: 42px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #162032;
+}
+
+.header-search input:focus {
+  outline: none;
 }
 
 .eyebrow {

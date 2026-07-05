@@ -456,6 +456,12 @@ function calculateAge(birthDate: string) {
   return age
 }
 
+function customerMatchesSearch(customer: Customer, query: string) {
+  const normalized = query.trim().toLocaleLowerCase('ko-KR')
+  if (!normalized) return true
+  return customer.name.toLocaleLowerCase('ko-KR').includes(normalized)
+}
+
 function uniqueNonEmpty(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
 }
@@ -573,6 +579,7 @@ function App() {
   const [historyCustomerId, setHistoryCustomerId] = useState<string | null>(null)
   const [noteCustomerId, setNoteCustomerId] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
   const [metricSheet, setMetricSheet] = useState<MetricSheet | null>(null)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const autoLocationPreparedRef = useRef<Set<string>>(new Set())
@@ -611,6 +618,7 @@ function App() {
   const noteCustomer = customers.find((customer) => customer.id === noteCustomerId) ?? null
   const touchedCustomers = activeCustomers.filter((customer) => customerHistory(customer).length > 0)
   const doneCustomers = activeCustomers.filter((customer) => customer.status === 'done')
+  const searchedCustomers = activeCustomers.filter((customer) => customerMatchesSearch(customer, customerSearch))
   const geocodableCustomers = activeCustomers.filter(needsMapLocationRefresh)
   const geocodableSignature = geocodableCustomers.map((customer) => `${customer.id}:${customer.updatedAt}`).join('|')
   const trustedCoordinateCount = activeCustomers.filter(hasTrustedCoordinates).length
@@ -1464,6 +1472,17 @@ function App() {
   return (
     <main className="sales-app">
       <header className="app-header">
+        {tab === 'customers' ? (
+          <label className="header-search">
+            <Search size={17} />
+            <input
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
+              placeholder="고객 이름 검색"
+              type="search"
+            />
+          </label>
+        ) : <span />}
         <button className="icon-button" type="button" onClick={() => setTab('settings')} aria-label="설정">
           <Settings size={22} />
         </button>
@@ -1720,12 +1739,14 @@ function App() {
   }
 
   function renderCustomers() {
+    const searchActive = customerSearch.trim().length > 0
+    const customerScope = searchActive ? searchedCustomers : activeCustomers
     const filtered =
       listFilter === 'open'
-        ? remainingCustomers
+        ? remainingCustomers.filter((customer) => customerMatchesSearch(customer, customerSearch))
         : listFilter === 'done'
-          ? activeCustomers.filter((customer) => customer.status === 'done')
-          : activeCustomers
+          ? customerScope.filter((customer) => customer.status === 'done')
+          : customerScope
     const showFlatCustomerList = listFilter !== 'age'
     return (
       <>
@@ -1773,7 +1794,7 @@ function App() {
           <button className="secondary full" type="button" onClick={sortScheduleByDistance}>가까운 순 정렬</button>
         </section>
 
-        {renderMap(activeCustomers, { title: '고객 위치 지도', subtitle: '전체 고객 기준', showMissingList: true })}
+        {renderMap(customerScope, { title: '고객 위치 지도', subtitle: searchActive ? '검색 결과 기준' : '전체 고객 기준', showMissingList: true })}
 
         <section className="panel form-panel">
           <PanelTitle title="지도 위치 표시" meta={`표시 가능 ${trustedCoordinateCount}/${activeCustomers.length}명`} />
@@ -1802,15 +1823,17 @@ function App() {
 
         {showFlatCustomerList ? (
           <section className="panel">
-            <PanelTitle title="고객 목록" meta={`${filtered.length}명`} />
+            <PanelTitle title="고객 목록" meta={searchActive ? `${filtered.length}/${activeCustomers.length}명` : `${filtered.length}명`} />
             <button className="primary full customer-add-button" type="button" onClick={openNewCustomerSheet}><Plus size={18} /> 고객 직접 추가</button>
-            <div className="list-stack">
-              {filtered.map((customer) => (
+            {filtered.length ? (
+              <div className="list-stack">
+                {filtered.map((customer) => (
                 <CustomerRow key={customer.id} customer={customer} showAdd />
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : <EmptyState text="검색 결과가 없습니다." />}
           </section>
-        ) : renderAgeGroups()}
+        ) : renderAgeGroups(customerScope)}
       </>
     )
   }
@@ -2072,8 +2095,8 @@ function App() {
     )
   }
 
-  function renderAgeGroups() {
-    const groups = activeCustomers.reduce<Record<string, Customer[]>>((acc, customer) => {
+  function renderAgeGroups(list: Customer[]) {
+    const groups = list.reduce<Record<string, Customer[]>>((acc, customer) => {
       const key = ageGroup(customer)
       acc[key] = [...(acc[key] ?? []), customer]
       return acc
@@ -2083,14 +2106,14 @@ function App() {
     return (
       <section className="panel">
         <PanelTitle title="나이별 보기" meta={`${entries.length}개 그룹`} />
-        {entries.map(([group, groupCustomers]) => (
+        {entries.length ? entries.map(([group, groupCustomers]) => (
           <div className="region-group" key={group}>
             <h2>{group}</h2>
             <div className="list-stack">
               {groupCustomers.map((customer) => <CustomerRow key={customer.id} customer={customer} showAdd />)}
             </div>
           </div>
-        ))}
+        )) : <EmptyState text="검색 결과가 없습니다." />}
       </section>
     )
   }
