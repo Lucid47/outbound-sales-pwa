@@ -1007,6 +1007,51 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.view-list .customer-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.view-list .customer-row > div:first-child {
+  min-width: 0;
+}
+
+.view-list .customer-row > div:first-child small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.view-list .customer-row > .pill {
+  align-self: start;
+}
+
+.view-list .customer-row > .action-grid,
+.view-list .customer-row > .secondary-grid {
+  grid-column: 1 / -1;
+}
+
+.view-list .customer-row > .action-grid,
+.view-list .customer-row > .secondary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.view-list .customer-row > .complete,
+.view-list .customer-row > .secondary.full {
+  grid-column: 1 / -1;
+  min-height: 44px;
+  font-size: 15px;
+}
+
+.view-list .customer-row .action-grid > button,
+.view-list .customer-row .secondary-grid > button {
+  min-height: 42px;
+  font-size: 13px;
+}
+
 .history-event-row {
   min-height: 96px;
   border: 1px solid #e5eaf2;
