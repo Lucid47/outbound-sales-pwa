@@ -110,7 +110,36 @@ https://lucid47.github.io/outbound-sales/
 - 브라우저 저장소 영구 보관 요청 사용
 - 백업 미실행 또는 오래된 백업에 대한 안내 메시지 표시
 - JSON 백업 내보내기와 복원 지원
+- Google Drive 앱데이터 기반 동기화 1단계 구현
+- Google Drive 일반 파일 백업 내보내기 1단계 구현
 - Safari 데이터 삭제, 기기 변경, 브라우저 캐시 정리 시 데이터 손실 가능성이 있으므로 주기적 백업 필요
+
+### Google Drive 동기화
+
+추천 구조는 `앱데이터 동기화 + 일반 Drive 백업 내보내기` 조합입니다.
+
+```text
+기본 동기화: Google Drive appDataFolder
+사용자 백업: 일반 Google Drive JSON 파일
+로컬 저장: IndexedDB
+```
+
+1단계 구현 범위:
+
+- 설정 화면에 Google Drive 동기화 섹션 추가
+- Google Identity Services로 Drive API access token 요청
+- `drive.appdata` 권한으로 앱 전용 숨김 동기화 파일 생성
+- `outbound-sales-sync.json` 파일에 현재 앱 데이터를 저장
+- Drive 데이터와 로컬 데이터를 ID 기준으로 병합
+- 같은 ID가 양쪽에 있으면 더 최근 수정 시각의 데이터를 우선
+- 로그성 데이터는 ID 기준으로 합쳐 데이터 유실을 줄임
+- `drive.file` 권한으로 사용자가 볼 수 있는 JSON 백업 파일 생성
+
+아직 1단계에서 제한되는 것:
+
+- 삭제 동기화는 별도 `deletedAt` 설계가 필요함
+- 앱이 완전히 닫힌 상태의 백그라운드 자동 동기화는 보장하지 않음
+- Google OAuth Client ID 설정 전에는 버튼이 비활성화됨
 
 ## 주요 제약
 
@@ -185,6 +214,45 @@ PATH="/Users/daehee/.cache/codex-runtimes/codex-primary-runtime/dependencies/nod
 
 빌드 결과는 `dist/`에 생성됩니다.
 
+## Google Drive 설정
+
+Google Drive 동기화를 활성화하려면 Google Cloud에서 OAuth Client ID를 만들어야 합니다.
+
+권장 설정:
+
+```text
+Google Cloud 프로젝트 생성
+→ Google Drive API 활성화
+→ OAuth 동의 화면 설정
+→ OAuth Client ID 생성
+→ Application type: Web application
+→ Authorized JavaScript origins 등록
+```
+
+로컬 개발 origin:
+
+```text
+http://localhost:5173
+```
+
+배포 origin:
+
+```text
+https://lucid47.github.io
+```
+
+로컬 `.env` 예시:
+
+```bash
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-web-client-id.apps.googleusercontent.com
+```
+
+GitHub Pages 배포에서는 저장소 Variables에 다음 값을 등록합니다.
+
+```text
+VITE_GOOGLE_CLIENT_ID
+```
+
 ## 배포
 
 현재 배포 방식은 GitHub Pages입니다.
@@ -230,6 +298,9 @@ GitHub Pages 배포 단계에서 간헐적으로 `Deployment failed, try again l
 - 검색 범위를 이름, 전화번호, 주소 일부까지 확대
 - `핸드폰1` 같은 실제 CSV 헤더 연락처 자동 인식 개선
 - 문자/전화 앱 실행 실패를 줄이기 위해 로그 저장보다 앱 실행을 우선하도록 개선
+- Google Drive 앱데이터 동기화 1단계 구현
+- Google Drive 일반 백업 파일 내보내기 1단계 구현
+- GitHub Pages 배포 시 `VITE_GOOGLE_CLIENT_ID` 저장소 변수 주입 가능하도록 수정
 
 ## 최근 확인된 문제와 개선
 

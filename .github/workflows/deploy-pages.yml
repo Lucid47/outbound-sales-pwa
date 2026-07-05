@@ -39,6 +39,7 @@ jobs:
         run: pnpm build
         env:
           DEPLOY_TARGET: github-pages
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

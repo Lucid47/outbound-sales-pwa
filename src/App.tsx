@@ -6,6 +6,7 @@ import L from 'leaflet'
 import {
   CalendarCheck,
   Check,
+  Cloud,
   Clipboard,
   Download,
   FileSpreadsheet,
@@ -15,6 +16,7 @@ import {
   Pencil,
   PhoneCall,
   Plus,
+  RefreshCw,
   RotateCcw,
   Route,
   Save,
@@ -34,6 +36,17 @@ import {
   type VisitSchedule,
   type VisitScheduleItem,
 } from './db/appDb'
+import {
+  createAppDataSyncFile,
+  createVisibleDriveBackup,
+  downloadDriveJson,
+  driveAppDataScope,
+  driveFileScope,
+  findAppDataSyncFile,
+  isGoogleDriveSyncConfigured,
+  requestGoogleDriveToken,
+  updateDriveJsonFile,
+} from './googleDriveSync'
 import './App.css'
 
 type TabKey = 'today' | 'customers' | 'import' | 'logs' | 'settings'
@@ -71,8 +84,20 @@ type ParsedCsv = {
 
 type FieldKey = 'name' | 'phoneNumber' | 'address' | 'birthDate' | 'notes' | 'latitude' | 'longitude'
 type FieldMapping = Record<FieldKey, number | null>
+type AppBackupPayload = {
+  schemaVersion?: number
+  exportedAt?: string
+  customerLists?: CustomerList[]
+  customers?: Customer[]
+  visitLogs?: VisitLog[]
+  contactLogs?: ContactLog[]
+  visitSchedules?: VisitSchedule[]
+  visitScheduleItems?: VisitScheduleItem[]
+  messageTemplates?: MessageTemplate[]
+}
 
 const installGuideDismissedKey = 'installGuideDismissed'
+const lastDriveSyncAtKey = 'lastDriveSyncAt'
 const defaultCenter: [number, number] = [37.5009, 127.0364]
 const userLocationIcon = L.divIcon({
   className: 'user-location-pin',
@@ -480,6 +505,38 @@ function uniqueNonEmpty(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
 }
 
+function mergeBackupPayloads(remote: AppBackupPayload, local: AppBackupPayload): AppBackupPayload {
+  return {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    customerLists: mergeById(remote.customerLists, local.customerLists),
+    customers: mergeById(remote.customers, local.customers),
+    visitLogs: mergeById(remote.visitLogs, local.visitLogs),
+    contactLogs: mergeById(remote.contactLogs, local.contactLogs),
+    visitSchedules: mergeById(remote.visitSchedules, local.visitSchedules),
+    visitScheduleItems: mergeById(remote.visitScheduleItems, local.visitScheduleItems),
+    messageTemplates: mergeById(remote.messageTemplates, local.messageTemplates),
+  }
+}
+
+function mergeById<T extends { id: string }>(remoteItems: T[] = [], localItems: T[] = []) {
+  const merged = new Map<string, T>()
+  remoteItems.forEach((item) => merged.set(item.id, item))
+  localItems.forEach((item) => {
+    const previous = merged.get(item.id)
+    if (!previous || itemTimestamp(item) >= itemTimestamp(previous)) {
+      merged.set(item.id, item)
+    }
+  })
+  return Array.from(merged.values())
+}
+
+function itemTimestamp(item: Record<string, unknown>) {
+  const value = item.updatedAt ?? item.createdAt ?? item.importedAt ?? item.visitedAt ?? item.completedAt ?? ''
+  const time = new Date(String(value)).getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
 function distanceKm(from: [number, number], to: [number, number]) {
   const radius = 6371
   const dLat = ((to[0] - from[0]) * Math.PI) / 180
@@ -584,6 +641,8 @@ function App() {
   const [messageCustomerId, setMessageCustomerId] = useState<string | null>(null)
   const [mapFocusTick, setMapFocusTick] = useState(0)
   const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
+  const [lastDriveSyncAt, setLastDriveSyncAt] = useState<string>(() => localStorage.getItem(lastDriveSyncAtKey) ?? '')
+  const [driveSyncBusy, setDriveSyncBusy] = useState(false)
   const [isStandalone, setIsStandalone] = useState(() => isPwaStandalone())
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
@@ -1243,8 +1302,9 @@ function App() {
     showToast(`${template.title} 템플릿을 삭제했습니다`)
   }
 
-  async function exportBackup() {
-    const payload = {
+  async function buildBackupPayload(): Promise<AppBackupPayload> {
+    return {
+      schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       customerLists: await appDb.customerLists.toArray(),
       customers: await appDb.customers.toArray(),
@@ -1254,6 +1314,10 @@ function App() {
       visitScheduleItems: await appDb.visitScheduleItems.toArray(),
       messageTemplates: await appDb.messageTemplates.toArray(),
     }
+  }
+
+  async function exportBackup() {
+    const payload = await buildBackupPayload()
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -1269,6 +1333,11 @@ function App() {
 
   async function importBackup(file: File) {
     const payload = JSON.parse(await file.text())
+    await restoreBackupPayload(payload)
+    showToast('백업을 복원했습니다')
+  }
+
+  async function restoreBackupPayload(payload: AppBackupPayload) {
     await appDb.transaction('rw', [appDb.customerLists, appDb.customers, appDb.visitLogs, appDb.contactLogs, appDb.visitSchedules, appDb.visitScheduleItems, appDb.messageTemplates], async () => {
       await Promise.all([
         appDb.customerLists.clear(),
@@ -1289,7 +1358,86 @@ function App() {
     })
     setActiveListId(payload.customerLists?.[0]?.id ?? '')
     await refresh()
-    showToast('백업을 복원했습니다')
+  }
+
+  function markDriveSyncComplete() {
+    const now = new Date().toISOString()
+    localStorage.setItem(lastDriveSyncAtKey, now)
+    setLastDriveSyncAt(now)
+  }
+
+  async function syncGoogleDrive() {
+    if (!isGoogleDriveSyncConfigured()) {
+      showToast('Google Client ID 설정이 필요합니다')
+      return
+    }
+    setDriveSyncBusy(true)
+    try {
+      const token = await requestGoogleDriveToken([driveAppDataScope])
+      const localPayload = await buildBackupPayload()
+      const syncFile = await findAppDataSyncFile(token)
+      if (!syncFile) {
+        await createAppDataSyncFile(token, localPayload as Record<string, unknown>)
+        markDriveSyncComplete()
+        showToast('Google Drive 동기화 파일을 만들었습니다')
+        return
+      }
+
+      const remotePayload = await downloadDriveJson<AppBackupPayload>(token, syncFile.id)
+      const mergedPayload = mergeBackupPayloads(remotePayload, localPayload)
+      await restoreBackupPayload(mergedPayload)
+      await updateDriveJsonFile(token, syncFile.id, mergedPayload as Record<string, unknown>)
+      markDriveSyncComplete()
+      showToast('Google Drive 동기화를 완료했습니다')
+    } catch {
+      showToast('Google Drive 동기화에 실패했습니다. 로그인 권한과 설정을 확인하세요')
+    } finally {
+      setDriveSyncBusy(false)
+    }
+  }
+
+  async function saveGoogleDriveSnapshot() {
+    if (!isGoogleDriveSyncConfigured()) {
+      showToast('Google Client ID 설정이 필요합니다')
+      return
+    }
+    setDriveSyncBusy(true)
+    try {
+      const token = await requestGoogleDriveToken([driveAppDataScope])
+      const payload = await buildBackupPayload()
+      const syncFile = await findAppDataSyncFile(token)
+      if (syncFile) {
+        await updateDriveJsonFile(token, syncFile.id, payload as Record<string, unknown>)
+      } else {
+        await createAppDataSyncFile(token, payload as Record<string, unknown>)
+      }
+      markDriveSyncComplete()
+      showToast('현재 기기 데이터를 Google Drive에 저장했습니다')
+    } catch {
+      showToast('Google Drive 저장에 실패했습니다. 로그인 권한과 설정을 확인하세요')
+    } finally {
+      setDriveSyncBusy(false)
+    }
+  }
+
+  async function exportBackupToGoogleDrive() {
+    if (!isGoogleDriveSyncConfigured()) {
+      showToast('Google Client ID 설정이 필요합니다')
+      return
+    }
+    setDriveSyncBusy(true)
+    try {
+      const token = await requestGoogleDriveToken([driveFileScope])
+      await createVisibleDriveBackup(token, await buildBackupPayload() as Record<string, unknown>)
+      const now = new Date().toISOString()
+      localStorage.setItem('lastBackupAt', now)
+      setLastBackupAt(now)
+      showToast('Google Drive에 백업 파일을 내보냈습니다')
+    } catch {
+      showToast('Google Drive 백업에 실패했습니다. 로그인 권한과 설정을 확인하세요')
+    } finally {
+      setDriveSyncBusy(false)
+    }
   }
 
   async function deleteCustomerList(list: CustomerList) {
@@ -1987,6 +2135,27 @@ function App() {
           <input value={newTemplateTitle} onChange={(event) => setNewTemplateTitle(event.target.value)} placeholder="템플릿 제목" />
           <textarea value={newTemplateBody} onChange={(event) => setNewTemplateBody(event.target.value)} placeholder="안녕하세요, {고객명}님." />
           <button className="primary full" type="button" onClick={addTemplate}><Plus size={18} /> 템플릿 추가</button>
+        </section>
+        <section className="panel form-panel">
+          <PanelTitle title="Google Drive 동기화" meta={lastDriveSyncAt ? `최근 ${formatTime(lastDriveSyncAt)}` : '설정 필요'} />
+          <p className="backup-note">
+            고객 데이터는 운영 서버가 아니라 사용자의 Google Drive 앱데이터 공간에 저장합니다. 평소에는 숨김 동기화 파일을 사용하고, 필요할 때 별도 백업 파일을 내보낼 수 있습니다.
+          </p>
+          {!isGoogleDriveSyncConfigured() && (
+            <p className="backup-note">Google Cloud에서 Web OAuth Client ID를 만들고 `.env`에 `VITE_GOOGLE_CLIENT_ID`를 설정하면 사용할 수 있습니다.</p>
+          )}
+          <button className="primary full" type="button" onClick={() => void syncGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+            <RefreshCw size={18} />
+            Drive와 동기화
+          </button>
+          <button className="secondary full" type="button" onClick={() => void saveGoogleDriveSnapshot()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+            <Cloud size={18} />
+            현재 기기 데이터를 Drive에 저장
+          </button>
+          <button className="secondary full" type="button" onClick={() => void exportBackupToGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+            <Upload size={18} />
+            Google Drive 백업 파일 만들기
+          </button>
         </section>
         <section className="panel form-panel">
           <PanelTitle title="백업/복원" meta={lastBackupAt ? `최근 ${formatTime(lastBackupAt)}` : '백업 없음'} />
