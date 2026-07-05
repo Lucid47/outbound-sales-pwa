@@ -17,6 +17,33 @@ https://lucid47.github.io/outbound-sales/
 - 서버 비용 없이 아이폰 브라우저의 로컬 저장소를 중심으로 운영한다.
 - 홈 화면에 추가한 뒤 다시 실행해도 기존 데이터가 자동으로 불러와지게 한다.
 
+## 프로젝트 관리 문서
+
+이 프로젝트는 GitHub 저장소와 로컬 기준 폴더를 함께 사용해 관리합니다.
+
+저장소:
+
+```text
+https://github.com/Lucid47/outbound-sales.git
+```
+
+현재 로컬 기준 폴더:
+
+```text
+/Users/daehee/Documents/Codex/2026-07-02/d/outputs/outbound-sales-pwa
+```
+
+새 Codex 프로젝트에서 이어서 작업할 때는 이 GitHub repo를 클론한 폴더를 기준 폴더로 열면 됩니다. 기존 로컬 폴더를 그대로 사용할 수도 있고, 새 위치에 repo를 클론해 사용할 수도 있습니다.
+
+관련 문서:
+
+- [기능 명세](docs/feature-spec.md)
+- [배포와 운영](docs/deployment.md)
+- [Google Drive 동기화](docs/google-drive-sync.md)
+- [알려진 이슈와 해결 기록](docs/known-issues.md)
+- [로드맵](ROADMAP.md)
+- [변경 이력](CHANGELOG.md)
+
 ## 현재 구현 상태
 
 ### 고객리스트 가져오기
