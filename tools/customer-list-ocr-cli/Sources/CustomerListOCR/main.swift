@@ -74,7 +74,7 @@ func printHelp() {
 
     Options:
       --out-dir <path>              출력 폴더. 기본값: ./ocr-output/<image-name>-<timestamp>
-      --headers "고객명,연락처,주소"   CSV 헤더. 생략하면 열1, 열2... 사용
+      --headers "열A,열B,열C"          CSV 헤더. 생략하면 열1, 열2... 사용
       --languages "ko-KR,en-US"     OCR 언어. 기본값: ko-KR,en-US
       --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값: 0
       --help                        도움말
