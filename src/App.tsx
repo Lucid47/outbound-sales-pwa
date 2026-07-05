@@ -213,7 +213,7 @@ function makeId(prefix: string) {
 }
 
 function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replaceAll(' ', '').replaceAll('_', '').replaceAll('-', '')
+  return value.trim().toLowerCase().replaceAll(' ', '').replaceAll('_', '').replaceAll('-', '').replace(/\d+$/, '')
 }
 
 function detectMapping(headers: string[]): FieldMapping {
@@ -231,7 +231,13 @@ function detectMapping(headers: string[]): FieldMapping {
 }
 
 function cleanPhone(phoneNumber: string) {
-  return phoneNumber.replace(/[^\d+]/g, '')
+  const trimmed = phoneNumber.trim()
+  const digits = trimmed.replace(/\D/g, '')
+  return trimmed.startsWith('+') ? `+${digits}` : digits
+}
+
+function hasDialablePhone(phoneNumber: string) {
+  return cleanPhone(phoneNumber).replace(/\D/g, '').length >= 7
 }
 
 function parseCoordinate(value: string, kind: 'latitude' | 'longitude') {
@@ -457,9 +463,17 @@ function calculateAge(birthDate: string) {
 }
 
 function customerMatchesSearch(customer: Customer, query: string) {
-  const normalized = query.trim().toLocaleLowerCase('ko-KR')
+  const normalized = normalizeSearchText(query)
   if (!normalized) return true
-  return customer.name.toLocaleLowerCase('ko-KR').includes(normalized)
+  const phoneQuery = cleanPhone(query).replace(/\D/g, '')
+  const phoneTarget = cleanPhone(customer.phoneNumber).replace(/\D/g, '')
+  return [customer.name, customer.phoneNumber, customer.address]
+    .some((value) => normalizeSearchText(value).includes(normalized))
+    || Boolean(phoneQuery && phoneTarget.includes(phoneQuery))
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLocaleLowerCase('ko-KR').replace(/\s+/g, '')
 }
 
 function uniqueNonEmpty(values: string[]) {
@@ -874,29 +888,42 @@ function App() {
     showToast(`${customer.name} 고객을 다시 활성화했습니다`)
   }
 
-  async function sendManualSms(customer: Customer) {
-    await addTouchLog(customer, 'manualSms', 'opened')
-    await refresh()
-    window.location.href = `sms:${cleanPhone(customer.phoneNumber)}`
+  function sendManualSms(customer: Customer) {
+    const phone = cleanPhone(customer.phoneNumber)
+    if (!hasDialablePhone(customer.phoneNumber)) {
+      showToast('연락처가 없어 문자앱을 열 수 없습니다. 고객 수정에서 연락처를 확인하세요')
+      return
+    }
+    void addTouchLog(customer, 'manualSms', 'opened').then(refresh)
+    window.location.href = `sms:${phone}`
   }
 
-  async function sendTemplateSms(customer: Customer, template: MessageTemplate) {
+  function sendTemplateSms(customer: Customer, template: MessageTemplate) {
+    const phone = cleanPhone(customer.phoneNumber)
+    if (!hasDialablePhone(customer.phoneNumber)) {
+      showToast('연락처가 없어 문자앱을 열 수 없습니다. 고객 수정에서 연락처를 확인하세요')
+      return
+    }
     const body = fillTemplate(template.body, customer)
-    try {
-      await navigator.clipboard.writeText(body)
-      showToast('템플릿 문자를 복사했습니다. 문자 앱에서 붙여넣어 전송하세요')
-    } catch {
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(body)
+        .then(() => showToast('템플릿 문자를 복사했습니다. 문자 앱에서 붙여넣어 전송하세요'))
+        .catch(() => showToast('본문 복사가 제한되었습니다. 템플릿 내용을 직접 복사하세요'))
+    } else {
       showToast('본문 복사가 제한되었습니다. 템플릿 내용을 직접 복사하세요')
     }
-    await addTouchLog(customer, 'templateSms', 'sentByUser', body, template.id)
-    await refresh()
-    window.location.href = `sms:${cleanPhone(customer.phoneNumber)}`
+    void addTouchLog(customer, 'templateSms', 'sentByUser', body, template.id).then(refresh)
+    window.location.href = `sms:${phone}`
   }
 
-  async function callCustomer(customer: Customer) {
-    await addTouchLog(customer, 'call', 'opened')
-    await refresh()
-    window.location.href = `tel:${cleanPhone(customer.phoneNumber)}`
+  function callCustomer(customer: Customer) {
+    const phone = cleanPhone(customer.phoneNumber)
+    if (!hasDialablePhone(customer.phoneNumber)) {
+      showToast('연락처가 없어 전화앱을 열 수 없습니다. 고객 수정에서 연락처를 확인하세요')
+      return
+    }
+    void addTouchLog(customer, 'call', 'opened').then(refresh)
+    window.location.href = `tel:${phone}`
   }
 
   function navigateCustomer(customer: Customer) {
@@ -1478,7 +1505,7 @@ function App() {
             <input
               value={customerSearch}
               onChange={(event) => setCustomerSearch(event.target.value)}
-              placeholder="고객 이름 검색"
+              placeholder="이름·전화·주소 검색"
               type="search"
             />
           </label>
@@ -1678,7 +1705,7 @@ function App() {
           <div className="panel-title">
             <div>
               <h2>문자 보내기</h2>
-              <span>{customer.name} · {customer.phoneNumber}</span>
+              <span>{customer.name} · {customer.phoneNumber || '연락처 없음'}</span>
             </div>
             <button className="sheet-close" type="button" onClick={() => setMessageCustomerId(null)}>닫기</button>
           </div>
