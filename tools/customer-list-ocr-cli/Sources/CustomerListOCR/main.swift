@@ -191,7 +191,7 @@ func buildTable(from boxes: [RecognizedTextBox]) -> OcrTable {
     }
 
     let medianHeight = median(boxes.map(\.height))
-    let rowThreshold = max(medianHeight * 0.75, 0.014)
+    let rowThreshold = max(medianHeight * 1.7, 0.035)
     let columnThreshold = max(median(boxes.map(\.width)) * 0.8, 0.045)
 
     let rowGroups = cluster(boxes.sorted { $0.centerY < $1.centerY }, key: \.centerY, threshold: rowThreshold)

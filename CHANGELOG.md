@@ -7,6 +7,7 @@
 - 고객리스트 OCR Swift CLI 기본 틀 추가
   - 이미지 입력, Apple Vision OCR, 좌표 JSON, 표 복원 JSON, CSV 출력 흐름 구현
   - OCR 출력물과 실제 고객정보 샘플 Git 제외 규칙 추가
+  - 실제 스캔 이미지 테스트 후 여러 줄 셀을 같은 행으로 묶도록 행 복원 기준 조정
 - 고객리스트 OCR 1차 구현 형태를 Swift CLI로 확정하고 최신 Apple OS/Xcode 기준, 고객정보 Git 제외 규칙 명시
 - PWA 고도화, OCR 분리 개발, PWA 병합, 네이티브 전환, Android 확장으로 이어지는 제품 개발 전략 추가
 - 고객리스트 OCR 계획에 Mac 검증 도구 범위, 데이터 구조, 표 복원 알고리즘, CSV 규칙, 완료 기준 보강
