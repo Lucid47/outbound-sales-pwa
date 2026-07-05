@@ -29,6 +29,7 @@ tools/customer-list-ocr-cli/ocr-output/
 --header-mode <auto|none>     첫 행 헤더 자동 판정. 기본값 auto
 --languages "ko-KR,en-US"     OCR 언어. 기본값 ko-KR,en-US
 --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값 0
+--row-threshold <number>      행 묶기 기준. 촘촘한 표는 0.01~0.018 권장
 --help                        도움말
 ```
 
@@ -42,6 +43,12 @@ tools/customer-list-ocr-cli/ocr-output/
 - `--header-mode none`이면 첫 행 헤더 판정을 하지 않고 단순 OCR 변환 결과를 CSV로 만듭니다.
 
 OCR CLI는 열의 의미를 해석하지 않고 셀 값을 행/열 형태로 복원하는 데만 집중합니다.
+
+행이 여러 줄로 합쳐지면 `--row-threshold` 값을 낮춰 실행합니다.
+
+```bash
+swift run customer-list-ocr /path/to/customer-list.heic --row-threshold 0.012
+```
 
 ## 개인정보 규칙
 

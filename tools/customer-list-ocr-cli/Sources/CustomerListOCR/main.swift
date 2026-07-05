@@ -10,6 +10,7 @@ struct CLIOptions {
     var headerMode: HeaderMode = .auto
     var languages: [String] = ["ko-KR", "en-US"]
     var minConfidence: Float = 0
+    var rowThreshold: Double?
     var showHelp = false
 }
 
@@ -103,6 +104,7 @@ func printHelp() {
       --header-mode <auto|none>     첫 행 헤더 자동 판정. 기본값: auto
       --languages "ko-KR,en-US"     OCR 언어. 기본값: ko-KR,en-US
       --min-confidence <number>     낮은 신뢰도 텍스트 제외 기준. 기본값: 0
+      --row-threshold <number>      행 묶기 기준. 촘촘한 표는 0.01~0.018 권장
       --help                        도움말
     """)
 }
@@ -150,6 +152,12 @@ func parseArguments(_ arguments: [String]) throws -> CLIOptions {
                 throw CLIError.invalidOption("--min-confidence 숫자 값이 필요합니다.")
             }
             options.minConfidence = value
+            index += 2
+        case "--row-threshold":
+            guard index + 1 < arguments.count, let value = Double(arguments[index + 1]), value > 0 else {
+                throw CLIError.invalidOption("--row-threshold 양수 값이 필요합니다.")
+            }
+            options.rowThreshold = value
             index += 2
         default:
             if argument.hasPrefix("-") {
@@ -220,13 +228,13 @@ func recognizeText(in image: CGImage, languages: [String], minConfidence: Float)
         }
 }
 
-func buildTable(from boxes: [RecognizedTextBox]) -> OcrTable {
+func buildTable(from boxes: [RecognizedTextBox], rowThresholdOverride: Double? = nil) -> OcrTable {
     guard !boxes.isEmpty else {
         return OcrTable(rows: [], columnCount: 0, warnings: ["OCR 텍스트가 없습니다."])
     }
 
     let medianHeight = median(boxes.map(\.height))
-    let rowThreshold = max(medianHeight * 1.7, 0.035)
+    let rowThreshold = rowThresholdOverride ?? max(medianHeight * 1.7, 0.035)
     let columnThreshold = max(median(boxes.map(\.width)) * 0.8, 0.045)
 
     let rowGroups = cluster(boxes.sorted { $0.centerY < $1.centerY }, key: \.centerY, threshold: rowThreshold)
@@ -499,7 +507,7 @@ func run() throws {
 
     let image = try loadCGImage(from: imagePath)
     let boxes = try recognizeText(in: image, languages: options.languages, minConfidence: options.minConfidence)
-    let table = buildTable(from: boxes)
+    let table = buildTable(from: boxes, rowThresholdOverride: options.rowThreshold)
     let csvResult = makeCSV(from: table, headers: options.headers, headerMode: options.headerMode)
 
     let boxesURL = outputURL.appendingPathComponent("ocr-boxes.json")
