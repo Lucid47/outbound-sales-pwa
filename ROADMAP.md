@@ -2,6 +2,21 @@
 
 이 문서는 앞으로 개발할 기능과 검토할 개선사항을 관리하기 위한 목록입니다.
 
+## 제품 개발 전략
+
+1. 현재 PWA는 유지하면서 기능, 성능, 안정성을 계속 고도화한다.
+2. OCR 기능은 PWA와 분리해 별도 기능으로 먼저 구현한다.
+   - 1차는 Mac 기반 검증 도구로 개발한다.
+   - Apple Vision OCR과 표 복원 품질을 먼저 확인한다.
+   - 이후 iPhone/iPad 문서 스캔 입력으로 확장한다.
+3. OCR 결과가 안정화되면 PWA의 고객리스트 import 흐름과 병합한다.
+   - 우선은 OCR 도구가 만든 CSV를 PWA가 가져오는 방식으로 연결한다.
+   - 가능하면 사용자가 PWA 안에서 OCR 기반 import를 자연스럽게 시작할 수 있게 한다.
+4. PWA 병합이 기술적으로 어렵거나 사용자 경험이 부족하면 네이티브 앱으로 전환 개발한다.
+5. 네이티브 앱으로 전환하는 경우 iPhone/iPad 우선 개발 후 Android 확장을 검토한다.
+   - iPhone/iPad: VisionKit, Apple Vision
+   - Android: ML Kit Document Scanner, ML Kit Text Recognition v2
+
 ## 가까운 개선
 
 - 모바일에서 카드형/목록형 전환 사용성 지속 점검
