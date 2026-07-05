@@ -1002,6 +1002,58 @@ textarea {
   line-height: 1.45;
 }
 
+.drive-account {
+  min-height: 62px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.drive-account img,
+.drive-account > svg {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+}
+
+.drive-account > svg {
+  padding: 9px;
+  background: #e8edf5;
+  color: #344054;
+}
+
+.drive-account div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.drive-account strong,
+.drive-account span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drive-account strong {
+  font-size: 14px;
+}
+
+.drive-account span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.drive-account button {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
 .geocode-progress {
   display: grid;
   gap: 8px;

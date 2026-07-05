@@ -4,6 +4,7 @@ const driveUploadBaseUrl = 'https://www.googleapis.com/upload/drive/v3'
 
 export const driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata'
 export const driveFileScope = 'https://www.googleapis.com/auth/drive.file'
+export const googleProfileScope = 'openid email profile'
 export const driveSyncFileName = 'outbound-sales-sync.json'
 
 type TokenResponse = {
@@ -41,6 +42,11 @@ type DriveFile = {
 }
 
 type JsonPayload = Record<string, unknown>
+export type GoogleUserProfile = {
+  email: string
+  name: string
+  picture?: string
+}
 
 let googleIdentityPromise: Promise<void> | null = null
 let tokenClient: TokenClient | null = null
@@ -50,7 +56,7 @@ export function isGoogleDriveSyncConfigured() {
   return Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
 }
 
-export async function requestGoogleDriveToken(scopes: string[]) {
+export async function requestGoogleDriveToken(scopes: string[], options: { prompt?: string } = {}) {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   if (!clientId) throw new Error('missing-google-client-id')
   await loadGoogleIdentity()
@@ -76,8 +82,22 @@ export async function requestGoogleDriveToken(scopes: string[]) {
       tokenClient.callback = callback
     }
 
-    tokenClient.requestAccessToken()
+    tokenClient.requestAccessToken(options.prompt === undefined ? undefined : { prompt: options.prompt })
   })
+}
+
+export async function getGoogleUserProfile(accessToken: string) {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) throw new Error('google-profile-failed')
+  const profile = await response.json() as Partial<GoogleUserProfile>
+  if (!profile.email) throw new Error('google-profile-missing-email')
+  return {
+    email: profile.email,
+    name: profile.name || profile.email,
+    picture: profile.picture,
+  }
 }
 
 export async function findAppDataSyncFile(accessToken: string) {

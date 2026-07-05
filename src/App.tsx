@@ -11,6 +11,7 @@ import {
   Download,
   FileSpreadsheet,
   ListFilter,
+  LogOut,
   MessageSquareText,
   Navigation,
   Pencil,
@@ -24,6 +25,7 @@ import {
   Settings,
   Trash2,
   Upload,
+  UserRound,
 } from 'lucide-react'
 import 'leaflet/dist/leaflet.css'
 import {
@@ -43,9 +45,12 @@ import {
   driveAppDataScope,
   driveFileScope,
   findAppDataSyncFile,
+  getGoogleUserProfile,
+  googleProfileScope,
   isGoogleDriveSyncConfigured,
   requestGoogleDriveToken,
   updateDriveJsonFile,
+  type GoogleUserProfile,
 } from './googleDriveSync'
 import './App.css'
 
@@ -95,9 +100,13 @@ type AppBackupPayload = {
   visitScheduleItems?: VisitScheduleItem[]
   messageTemplates?: MessageTemplate[]
 }
+type GoogleDriveAccount = GoogleUserProfile & {
+  connectedAt: string
+}
 
 const installGuideDismissedKey = 'installGuideDismissed'
 const lastDriveSyncAtKey = 'lastDriveSyncAt'
+const googleDriveAccountKey = 'googleDriveAccount'
 const defaultCenter: [number, number] = [37.5009, 127.0364]
 const userLocationIcon = L.divIcon({
   className: 'user-location-pin',
@@ -537,6 +546,16 @@ function itemTimestamp(item: Record<string, unknown>) {
   return Number.isFinite(time) ? time : 0
 }
 
+function loadGoogleDriveAccount(): GoogleDriveAccount | null {
+  try {
+    const raw = localStorage.getItem(googleDriveAccountKey)
+    return raw ? JSON.parse(raw) as GoogleDriveAccount : null
+  } catch {
+    localStorage.removeItem(googleDriveAccountKey)
+    return null
+  }
+}
+
 function distanceKm(from: [number, number], to: [number, number]) {
   const radius = 6371
   const dLat = ((to[0] - from[0]) * Math.PI) / 180
@@ -643,6 +662,7 @@ function App() {
   const [lastBackupAt, setLastBackupAt] = useState<string>(() => localStorage.getItem('lastBackupAt') ?? '')
   const [lastDriveSyncAt, setLastDriveSyncAt] = useState<string>(() => localStorage.getItem(lastDriveSyncAtKey) ?? '')
   const [driveSyncBusy, setDriveSyncBusy] = useState(false)
+  const [googleDriveAccount, setGoogleDriveAccount] = useState<GoogleDriveAccount | null>(() => loadGoogleDriveAccount())
   const [isStandalone, setIsStandalone] = useState(() => isPwaStandalone())
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showInstallGuide, setShowInstallGuide] = useState(false)
@@ -1366,11 +1386,46 @@ function App() {
     setLastDriveSyncAt(now)
   }
 
+  async function connectGoogleDrive() {
+    if (!isGoogleDriveSyncConfigured()) {
+      showToast('Google Client ID 설정이 필요합니다')
+      return
+    }
+    setDriveSyncBusy(true)
+    try {
+      const token = await requestGoogleDriveToken([googleProfileScope, driveAppDataScope], { prompt: 'consent' })
+      const profile = await getGoogleUserProfile(token)
+      const account = { ...profile, connectedAt: new Date().toISOString() }
+      localStorage.setItem(googleDriveAccountKey, JSON.stringify(account))
+      setGoogleDriveAccount(account)
+      showToast(`${account.email} 계정으로 Google Drive를 연결했습니다`)
+    } catch {
+      showToast('Google 계정 연결에 실패했습니다. 팝업 차단과 OAuth 설정을 확인하세요')
+    } finally {
+      setDriveSyncBusy(false)
+    }
+  }
+
+  function disconnectGoogleDrive() {
+    localStorage.removeItem(googleDriveAccountKey)
+    localStorage.removeItem(lastDriveSyncAtKey)
+    setGoogleDriveAccount(null)
+    setLastDriveSyncAt('')
+    showToast('이 기기의 Google Drive 연결 정보를 삭제했습니다')
+  }
+
+  function ensureGoogleDriveConnected() {
+    if (googleDriveAccount) return true
+    showToast('먼저 Google 계정으로 연결하세요')
+    return false
+  }
+
   async function syncGoogleDrive() {
     if (!isGoogleDriveSyncConfigured()) {
       showToast('Google Client ID 설정이 필요합니다')
       return
     }
+    if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
       const token = await requestGoogleDriveToken([driveAppDataScope])
@@ -1401,6 +1456,7 @@ function App() {
       showToast('Google Client ID 설정이 필요합니다')
       return
     }
+    if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
       const token = await requestGoogleDriveToken([driveAppDataScope])
@@ -1425,6 +1481,7 @@ function App() {
       showToast('Google Client ID 설정이 필요합니다')
       return
     }
+    if (!ensureGoogleDriveConnected()) return
     setDriveSyncBusy(true)
     try {
       const token = await requestGoogleDriveToken([driveFileScope])
@@ -2137,22 +2194,46 @@ function App() {
           <button className="primary full" type="button" onClick={addTemplate}><Plus size={18} /> 템플릿 추가</button>
         </section>
         <section className="panel form-panel">
-          <PanelTitle title="Google Drive 동기화" meta={lastDriveSyncAt ? `최근 ${formatTime(lastDriveSyncAt)}` : '설정 필요'} />
+          <PanelTitle
+            title="Google Drive 동기화"
+            meta={!isGoogleDriveSyncConfigured() ? '설정 필요' : googleDriveAccount ? (lastDriveSyncAt ? `최근 ${formatTime(lastDriveSyncAt)}` : '연결됨') : '연결 필요'}
+          />
           <p className="backup-note">
             고객 데이터는 운영 서버가 아니라 사용자의 Google Drive 앱데이터 공간에 저장합니다. 평소에는 숨김 동기화 파일을 사용하고, 필요할 때 별도 백업 파일을 내보낼 수 있습니다.
           </p>
           {!isGoogleDriveSyncConfigured() && (
             <p className="backup-note">Google Cloud에서 Web OAuth Client ID를 만들고 `.env`에 `VITE_GOOGLE_CLIENT_ID`를 설정하면 사용할 수 있습니다.</p>
           )}
-          <button className="primary full" type="button" onClick={() => void syncGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+          {isGoogleDriveSyncConfigured() && googleDriveAccount && (
+            <div className="drive-account">
+              {googleDriveAccount.picture
+                ? <img src={googleDriveAccount.picture} alt="" />
+                : <UserRound size={22} />}
+              <div>
+                <strong>{googleDriveAccount.name}</strong>
+                <span>{googleDriveAccount.email}</span>
+              </div>
+              <button className="secondary" type="button" onClick={disconnectGoogleDrive} disabled={driveSyncBusy}>
+                <LogOut size={16} />
+                해제
+              </button>
+            </div>
+          )}
+          {isGoogleDriveSyncConfigured() && !googleDriveAccount && (
+            <button className="primary full" type="button" onClick={() => void connectGoogleDrive()} disabled={driveSyncBusy}>
+              <UserRound size={18} />
+              Google 계정으로 연결
+            </button>
+          )}
+          <button className="primary full" type="button" onClick={() => void syncGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
             <RefreshCw size={18} />
             Drive와 동기화
           </button>
-          <button className="secondary full" type="button" onClick={() => void saveGoogleDriveSnapshot()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+          <button className="secondary full" type="button" onClick={() => void saveGoogleDriveSnapshot()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
             <Cloud size={18} />
             현재 기기 데이터를 Drive에 저장
           </button>
-          <button className="secondary full" type="button" onClick={() => void exportBackupToGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured()}>
+          <button className="secondary full" type="button" onClick={() => void exportBackupToGoogleDrive()} disabled={driveSyncBusy || !isGoogleDriveSyncConfigured() || !googleDriveAccount}>
             <Upload size={18} />
             Google Drive 백업 파일 만들기
           </button>
