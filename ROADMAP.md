@@ -64,8 +64,8 @@
   - 네이티브 연락처/문자/지도 연동
   - 개발환경 가이드: `docs/native-app-setup.md`
   - 현재 초안: `native/OutboundSalesCore`, `native/OutboundSalesNative`, `native/OutboundSalesiOS`
-  - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트/파일 import, 고객리스트/고객 로컬 JSON 저장, Apple MapKit 지도 탭
-  - 다음 단계: 실제 기기 또는 시뮬레이터 실행 확인, 주소 좌표 변환, 엑셀 파일 import, 고객 상세/전화/문자/길찾기 액션 포팅
+  - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트/파일 import, 고객리스트/고객 로컬 JSON 저장, Apple MapKit 지도 탭, 고객 상세/수정, 전화/문자/길찾기, 히스토리, 오늘 스케줄, JSON 백업/복원, 주소 좌표 변환
+  - 다음 단계: 실제 기기 QA, 엑셀 파일 import, OCR 실제 사진/문서 선택과 Vision OCR, Google Drive 계정 연동
 - OCR 기반 고객리스트 인식
   - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
   - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원

@@ -1,3 +1,4 @@
+import OutboundSalesCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -233,11 +234,50 @@ struct LogsView: View {
             List {
                 Section("누적 상태") {
                     LabeledContent("전체 고객", value: "\(state.visibleCustomers.count)")
+                    LabeledContent("터치 기록", value: "\(state.contactLogs.count)")
+                    LabeledContent("방문 기록", value: "\(state.visitLogs.count)")
                     LabeledContent("완료 고객", value: "\(state.doneCustomerCount)")
                     LabeledContent("미완료 고객", value: "\(state.openCustomerCount)")
                 }
+
+                Section("최근 히스토리") {
+                    let contactItems = state.contactLogs.prefix(20)
+                    if contactItems.isEmpty && state.visitLogs.isEmpty {
+                        Text("기록 없음")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(contactItems), id: \.id) { log in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(logTitle(log.type))
+                                    .font(.headline)
+                                Text(customerName(log.customerId))
+                                    .foregroundStyle(.secondary)
+                                if let body = log.messageBody, !body.isEmpty {
+                                    Text(body)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle("기록")
+        }
+    }
+
+    private func customerName(_ id: String) -> String {
+        state.customers.first { $0.id == id }?.name ?? "고객"
+    }
+
+    private func logTitle(_ type: ContactLogType) -> String {
+        switch type {
+        case .call: return "전화 시도"
+        case .manualSms: return "문자 시도"
+        case .templateSms: return "템플릿 문자"
+        case .note: return "메모"
+        case .statusComplete: return "완료 처리"
+        case .statusReopen: return "완료 취소"
         }
     }
 }
@@ -245,12 +285,32 @@ struct LogsView: View {
 struct SettingsView: View {
     @EnvironmentObject private var state: NativeAppState
     @State private var showingResetConfirmation = false
+    @State private var showingBackupImporter = false
+    @State private var showingBackupExporter = false
+    @State private var backupFile: BackupDocument?
 
     var body: some View {
         NavigationStack {
             List {
                 Section("로컬 저장") {
                     LabeledContent("상태", value: state.storageMessage.isEmpty ? "대기 중" : state.storageMessage)
+                    Button {
+                        do {
+                            backupFile = BackupDocument(data: try state.exportSnapshotData())
+                            showingBackupExporter = true
+                        } catch {
+                            backupFile = nil
+                        }
+                    } label: {
+                        Label("JSON 백업 내보내기", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        showingBackupImporter = true
+                    } label: {
+                        Label("JSON 백업 가져오기", systemImage: "square.and.arrow.down")
+                    }
+
                     Button(role: .destructive) {
                         showingResetConfirmation = true
                     } label: {
@@ -260,7 +320,7 @@ struct SettingsView: View {
 
                 Section("네이티브 앱") {
                     Label("고객리스트와 고객 정보는 기기 안에 저장합니다.", systemImage: "externaldrive")
-                    Label("Google Drive 동기화는 PWA 구현을 기준으로 별도 포팅합니다.", systemImage: "icloud")
+                    Label("Google Drive 동기화는 계정 연동 단계에서 별도 연결합니다.", systemImage: "icloud")
                 }
             }
             .navigationTitle("설정")
@@ -270,6 +330,38 @@ struct SettingsView: View {
                 }
                 Button("취소", role: .cancel) {}
             }
+            .fileImporter(
+                isPresented: $showingBackupImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    state.importSnapshot(url: url)
+                }
+            }
+            .fileExporter(
+                isPresented: $showingBackupExporter,
+                document: backupFile ?? BackupDocument(),
+                contentType: .json,
+                defaultFilename: "outbound-sales-backup.json"
+            ) { _ in }
         }
+    }
+}
+
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+
+    init(data: Data = Data()) {
+        self.data = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        self.data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }

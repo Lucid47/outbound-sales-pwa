@@ -38,12 +38,23 @@ struct CustomerMapView: View {
             .navigationTitle("지도")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        fitMappedCustomers()
-                    } label: {
-                        Image(systemName: "scope")
+                    HStack {
+                        Button {
+                            fitMappedCustomers()
+                        } label: {
+                            Image(systemName: "scope")
+                        }
+                        .disabled(mappedCustomers.isEmpty)
+
+                        Button {
+                            Task {
+                                await state.geocodeVisibleCustomers()
+                                fitMappedCustomers()
+                            }
+                        } label: {
+                            Image(systemName: "mappin.and.ellipse")
+                        }
                     }
-                    .disabled(mappedCustomers.isEmpty)
                 }
             }
         }

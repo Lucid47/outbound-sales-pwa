@@ -4,6 +4,11 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var customerLists: [CustomerList]
     public var customers: [Customer]
+    public var visitLogs: [VisitLog]
+    public var contactLogs: [ContactLog]
+    public var visitSchedules: [VisitSchedule]
+    public var visitScheduleItems: [VisitScheduleItem]
+    public var messageTemplates: [MessageTemplate]
     public var selectedListId: String?
     public var savedAt: Date
 
@@ -11,14 +16,38 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         schemaVersion: Int = 1,
         customerLists: [CustomerList],
         customers: [Customer],
+        visitLogs: [VisitLog] = [],
+        contactLogs: [ContactLog] = [],
+        visitSchedules: [VisitSchedule] = [],
+        visitScheduleItems: [VisitScheduleItem] = [],
+        messageTemplates: [MessageTemplate] = [],
         selectedListId: String?,
         savedAt: Date = Date()
     ) {
         self.schemaVersion = schemaVersion
         self.customerLists = customerLists
         self.customers = customers
+        self.visitLogs = visitLogs
+        self.contactLogs = contactLogs
+        self.visitSchedules = visitSchedules
+        self.visitScheduleItems = visitScheduleItems
+        self.messageTemplates = messageTemplates
         self.selectedListId = selectedListId
         self.savedAt = savedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        self.customerLists = try container.decodeIfPresent([CustomerList].self, forKey: .customerLists) ?? []
+        self.customers = try container.decodeIfPresent([Customer].self, forKey: .customers) ?? []
+        self.visitLogs = try container.decodeIfPresent([VisitLog].self, forKey: .visitLogs) ?? []
+        self.contactLogs = try container.decodeIfPresent([ContactLog].self, forKey: .contactLogs) ?? []
+        self.visitSchedules = try container.decodeIfPresent([VisitSchedule].self, forKey: .visitSchedules) ?? []
+        self.visitScheduleItems = try container.decodeIfPresent([VisitScheduleItem].self, forKey: .visitScheduleItems) ?? []
+        self.messageTemplates = try container.decodeIfPresent([MessageTemplate].self, forKey: .messageTemplates) ?? []
+        self.selectedListId = try container.decodeIfPresent(String.self, forKey: .selectedListId)
+        self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt) ?? Date()
     }
 }
 

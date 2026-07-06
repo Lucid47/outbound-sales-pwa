@@ -48,8 +48,18 @@ struct TodayView: View {
                 }
 
                 Section("오늘 확인할 고객") {
-                    ForEach(state.visibleCustomers.prefix(8)) { customer in
-                        CustomerRow(customer: customer)
+                    if state.todayScheduledCustomers.isEmpty {
+                        Text("고객 상세에서 오늘 스케줄에 추가할 수 있습니다.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(state.todayScheduledCustomers) { customer in
+                            NavigationLink {
+                                CustomerDetailView(customerId: customer.id)
+                                    .environmentObject(state)
+                            } label: {
+                                CustomerRow(customer: customer)
+                            }
+                        }
                     }
                 }
             }
@@ -88,8 +98,9 @@ struct CustomersView: View {
 
                 Section("고객") {
                     ForEach(state.visibleCustomers) { customer in
-                        Button {
-                            state.toggleDone(customer)
+                        NavigationLink {
+                            CustomerDetailView(customerId: customer.id)
+                                .environmentObject(state)
                         } label: {
                             CustomerRow(customer: customer)
                         }
@@ -121,6 +132,11 @@ struct CustomerRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                if let birthDate = customer.birthDate, !birthDate.isEmpty {
+                    Text(birthDate)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 4)
