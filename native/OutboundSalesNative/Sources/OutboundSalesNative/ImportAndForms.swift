@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ImportView: View {
     @EnvironmentObject private var state: NativeAppState
     @State private var companyName = ""
     @State private var listName = ""
+    @State private var showingFileImporter = false
+    @State private var showingCreateList = false
+    @State private var showingAddCustomer = false
     @State private var csvText = """
     이름,전화번호,주소,메모
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
@@ -12,19 +16,52 @@ struct ImportView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("리스트 정보") {
+                Section("고객리스트 정보") {
                     TextField("고객사 이름", text: $companyName)
                     TextField("고객리스트 이름", text: $listName)
                 }
 
-                Section("CSV 텍스트") {
+                Section("파일에서 가져오기") {
+                    Button {
+                        showingFileImporter = true
+                    } label: {
+                        Label("CSV 파일 선택", systemImage: "doc.badge.plus")
+                    }
+
+                    Label("엑셀 파일(.xlsx)은 다음 단계에서 연결합니다.", systemImage: "tablecells")
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("직접 만들기") {
+                    Button {
+                        showingCreateList = true
+                    } label: {
+                        Label("빈 고객리스트 생성", systemImage: "folder.badge.plus")
+                    }
+
+                    Button {
+                        showingAddCustomer = true
+                    } label: {
+                        Label("선택 리스트에 고객 수동 추가", systemImage: "person.badge.plus")
+                    }
+                    .disabled(state.selectedListId == nil)
+                }
+
+                Section("사진에서 가져오기") {
+                    OCRImportView()
+                        .environmentObject(state)
+                }
+
+                Section("CSV 텍스트 붙여넣기") {
                     TextEditor(text: $csvText)
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 180)
-                }
 
-                Button("CSV 가져오기") {
-                    state.importCSV(text: csvText, companyName: companyName, listName: listName)
+                    Button {
+                        state.importCSV(text: csvText, companyName: companyName, listName: listName)
+                    } label: {
+                        Label("붙여넣은 CSV 가져오기", systemImage: "square.and.arrow.down")
+                    }
                 }
 
                 if !state.importMessage.isEmpty {
@@ -33,28 +70,53 @@ struct ImportView: View {
                 }
             }
             .navigationTitle("가져오기")
+            .fileImporter(
+                isPresented: $showingFileImporter,
+                allowedContentTypes: ImportFileType.allowedTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    state.importFile(url: url, companyName: companyName, listName: listName)
+                case .failure:
+                    state.importMessage = "파일 선택을 완료하지 못했습니다."
+                }
+            }
+            .sheet(isPresented: $showingCreateList) {
+                CreateListView(companyName: companyName, listName: listName)
+                    .environmentObject(state)
+            }
+            .sheet(isPresented: $showingAddCustomer) {
+                AddCustomerView()
+                    .environmentObject(state)
+            }
         }
     }
+}
+
+enum ImportFileType {
+    static let excelWorkbook = UTType(filenameExtension: "xlsx") ?? .data
+    static let legacyExcelWorkbook = UTType(filenameExtension: "xls") ?? .data
+    static let allowedTypes: [UTType] = [
+        .commaSeparatedText,
+        .plainText,
+        excelWorkbook,
+        legacyExcelWorkbook
+    ]
 }
 
 struct OCRImportView: View {
     @EnvironmentObject private var state: NativeAppState
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("OCR 가져오기") {
-                    Label("문서 스캔", systemImage: "doc.viewfinder")
-                    Label("Apple Vision OCR", systemImage: "text.viewfinder")
-                    Label("표 미리보기와 CSV 생성", systemImage: "tablecells")
-                }
-
-                Section("상태") {
-                    Text(state.ocrMessage)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("OCR")
+        VStack(alignment: .leading, spacing: 10) {
+            Label("문서 스캔", systemImage: "doc.viewfinder")
+            Label("Apple Vision OCR", systemImage: "text.viewfinder")
+            Label("표 미리보기와 CSV 생성", systemImage: "tablecells")
+            Text(state.ocrMessage)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -98,8 +160,13 @@ struct AddCustomerView: View {
 struct CreateListView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
-    @State private var companyName = ""
-    @State private var listName = ""
+    @State private var companyName: String
+    @State private var listName: String
+
+    init(companyName: String = "", listName: String = "") {
+        self._companyName = State(initialValue: companyName)
+        self._listName = State(initialValue: listName)
+    }
 
     var body: some View {
         NavigationStack {

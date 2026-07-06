@@ -20,10 +20,6 @@ public struct OutboundSalesRootView: View {
                 .environmentObject(state)
                 .tabItem { Label("가져오기", systemImage: "square.and.arrow.down") }
 
-            OCRImportView()
-                .environmentObject(state)
-                .tabItem { Label("OCR", systemImage: "doc.viewfinder") }
-
             LogsView()
                 .environmentObject(state)
                 .tabItem { Label("기록", systemImage: "clock.arrow.circlepath") }
@@ -60,8 +56,6 @@ struct TodayView: View {
 
 struct CustomersView: View {
     @EnvironmentObject private var state: NativeAppState
-    @State private var showingAddCustomer = false
-    @State private var showingCreateList = false
 
     var body: some View {
         NavigationStack {
@@ -100,30 +94,6 @@ struct CustomersView: View {
             }
             .searchable(text: $state.searchText, prompt: "이름, 전화번호, 주소 검색")
             .navigationTitle("고객")
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        showingCreateList = true
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
-                    }
-
-                    Button {
-                        showingAddCustomer = true
-                    } label: {
-                        Image(systemName: "person.badge.plus")
-                    }
-                    .disabled(state.selectedListId == nil)
-                }
-            }
-            .sheet(isPresented: $showingAddCustomer) {
-                AddCustomerView()
-                    .environmentObject(state)
-            }
-            .sheet(isPresented: $showingCreateList) {
-                CreateListView()
-                    .environmentObject(state)
-            }
         }
     }
 }

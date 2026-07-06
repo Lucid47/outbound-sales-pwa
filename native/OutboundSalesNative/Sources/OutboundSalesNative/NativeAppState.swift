@@ -107,6 +107,30 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    public func importFile(url: URL, companyName: String, listName: String) {
+        let accessGranted = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let fileName = url.lastPathComponent
+        let fileExtension = url.pathExtension.lowercased()
+
+        guard fileExtension != "xlsx" && fileExtension != "xls" else {
+            importMessage = "엑셀 파일 가져오기는 다음 단계에서 연결합니다. 현재는 CSV 파일을 사용할 수 있습니다."
+            return
+        }
+
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            importCSV(text: text, companyName: companyName, listName: listName, sourceFileName: fileName)
+        } catch {
+            importMessage = "파일을 읽지 못했습니다."
+        }
+    }
+
     public func addCustomer(name: String, phoneNumber: String, address: String, notes: String) {
         guard let listId = selectedListId else { return }
         let now = Date()
