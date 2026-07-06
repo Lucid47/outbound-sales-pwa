@@ -51,6 +51,10 @@
   - Kakao 지도 전환 또는 병행 검토
   - 주소 좌표 변환 캐시 관리
   - 위치 표시 실패 주소 재시도 기능
+- 네이티브 지도 고도화
+  - Apple MapKit 기반 지도 탭을 우선 사용
+  - 고객 주소를 좌표로 변환해 지도 핀 자동 생성
+  - 고객 핀 선택 시 고객 상세/전화/문자/길찾기 액션 연결
 
 ## 장기 검토
 
@@ -60,8 +64,8 @@
   - 네이티브 연락처/문자/지도 연동
   - 개발환경 가이드: `docs/native-app-setup.md`
   - 현재 초안: `native/OutboundSalesCore`, `native/OutboundSalesNative`, `native/OutboundSalesiOS`
-  - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트/파일 import, 고객리스트/고객 로컬 JSON 저장
-  - 다음 단계: 실제 기기 또는 시뮬레이터 실행 확인, 엑셀 파일 import, 고객 상세/전화/문자/길찾기 액션 포팅
+  - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트/파일 import, 고객리스트/고객 로컬 JSON 저장, Apple MapKit 지도 탭
+  - 다음 단계: 실제 기기 또는 시뮬레이터 실행 확인, 주소 좌표 변환, 엑셀 파일 import, 고객 상세/전화/문자/길찾기 액션 포팅
 - OCR 기반 고객리스트 인식
   - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
   - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원

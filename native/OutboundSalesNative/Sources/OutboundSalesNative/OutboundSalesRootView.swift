@@ -16,6 +16,10 @@ public struct OutboundSalesRootView: View {
                 .environmentObject(state)
                 .tabItem { Label("고객", systemImage: "person.3") }
 
+            CustomerMapView()
+                .environmentObject(state)
+                .tabItem { Label("지도", systemImage: "map") }
+
             ImportView()
                 .environmentObject(state)
                 .tabItem { Label("가져오기", systemImage: "square.and.arrow.down") }
