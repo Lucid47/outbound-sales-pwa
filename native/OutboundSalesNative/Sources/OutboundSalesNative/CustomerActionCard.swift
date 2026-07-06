@@ -19,23 +19,25 @@ struct CustomerActionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(customer.name.isEmpty ? "이름 없음" : customer.name)
                         .font(compact ? .title3.weight(.heavy) : .title2.weight(.heavy))
+                        .foregroundStyle(AppPalette.textPrimary)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
                     Text(regionLine)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppPalette.textSecondary)
                     if !customer.phoneNumber.isEmpty {
                         Text(customer.phoneNumber)
                             .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AppPalette.textPrimary)
                     }
                     Text(customer.address.isEmpty ? "주소 없음" : customer.address)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppPalette.textSecondary)
                         .lineLimit(compact ? 1 : 2)
                     if !compact, let latest = state.logs(for: customer).first {
                         Text("최근: \(latest.1)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppPalette.textSecondary)
                     }
                 }
                 Spacer()
@@ -97,10 +99,10 @@ struct CustomerActionCard: View {
             }
         }
         .padding(compact ? 10 : 12)
-        .background(Color(red: 0.973, green: 0.98, blue: 0.988))
+        .background(AppPalette.cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(red: 0.847, green: 0.871, blue: 0.91), lineWidth: 1)
+                .stroke(AppPalette.hairline, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .sheet(isPresented: $showingEdit) {
@@ -229,6 +231,7 @@ struct CustomerCompactRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(customer.name.isEmpty ? "이름 없음" : customer.name)
                         .font(.title3.weight(.heavy))
+                        .foregroundStyle(AppPalette.textPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
 
@@ -236,7 +239,7 @@ struct CustomerCompactRow: View {
                         if !customer.phoneNumber.isEmpty {
                             Text(customer.phoneNumber)
                                 .font(.subheadline.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(AppPalette.textPrimary)
                                 .lineLimit(1)
                         }
                         Text(state.progressLabel(for: customer))
@@ -247,7 +250,7 @@ struct CustomerCompactRow: View {
 
                     Text(compactAddressLine)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppPalette.textSecondary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -259,7 +262,7 @@ struct CustomerCompactRow: View {
         .padding(.horizontal, 2)
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(Color(red: 0.894, green: 0.91, blue: 0.937))
+                .fill(AppPalette.hairline)
                 .frame(height: 1)
         }
     }

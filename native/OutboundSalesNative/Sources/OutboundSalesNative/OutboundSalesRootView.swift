@@ -28,7 +28,6 @@ public struct OutboundSalesRootView: View {
                 .environmentObject(state)
                 .tabItem { Label("설정", systemImage: "gearshape") }
         }
-        .preferredColorScheme(.light)
         .task {
             await state.performStartupMaintenance()
         }
@@ -152,7 +151,7 @@ struct CustomersView: View {
                     if !state.geocodeMessage.isEmpty {
                         Label(state.geocodeMessage, systemImage: "mappin.and.ellipse")
                             .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppPalette.textSecondary)
                     }
 
                     NavigationLink {
@@ -161,10 +160,11 @@ struct CustomersView: View {
                     } label: {
                         HStack {
                             Label("고객 위치 지도", systemImage: "map")
+                                .foregroundStyle(AppPalette.textPrimary)
                             Spacer()
                             Text("표시 가능 \(state.visibleCustomers.filter { $0.latitude != nil && $0.longitude != nil }.count)/\(state.visibleCustomers.count)명")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppPalette.textSecondary)
                         }
                         .padding(12)
                         .background(.white)
@@ -178,6 +178,7 @@ struct CustomersView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .colorScheme(.light)
 
                     Picker("표시 방식", selection: $displayMode) {
                         ForEach(CustomerDisplayMode.allCases) { mode in
@@ -185,19 +186,31 @@ struct CustomersView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .colorScheme(.light)
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("고객 목록")
                                 .font(.headline)
+                                .foregroundStyle(AppPalette.textPrimary)
                             Spacer()
                             Text("\(filteredCustomers.count)명")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(AppPalette.textSecondary)
                         }
 
                         if filteredCustomers.isEmpty {
-                            ContentUnavailableView("고객 없음", systemImage: "person.3", description: Text("가져오기 탭에서 고객을 추가하세요."))
+                            VStack(spacing: 8) {
+                                Image(systemName: "person.3")
+                                    .font(.largeTitle)
+                                    .foregroundStyle(AppPalette.textSecondary)
+                                Text("고객 없음")
+                                    .font(.headline)
+                                    .foregroundStyle(AppPalette.textPrimary)
+                                Text("가져오기 탭에서 고객을 추가하세요.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(AppPalette.textSecondary)
+                            }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 28)
                         } else {
@@ -218,10 +231,30 @@ struct CustomersView: View {
                 }
                 .padding(12)
             }
-            .background(Color(red: 0.961, green: 0.969, blue: 0.984))
+            .background(AppPalette.pageBackground)
             .searchable(text: $state.searchText, prompt: "이름, 전화번호, 주소 검색")
             .navigationTitle("고객")
+            .customerNavigationLightScheme()
         }
+    }
+}
+
+enum AppPalette {
+    static let textPrimary = Color(red: 0.086, green: 0.125, blue: 0.196)
+    static let textSecondary = Color(red: 0.43, green: 0.475, blue: 0.57)
+    static let hairline = Color(red: 0.847, green: 0.871, blue: 0.91)
+    static let cardBackground = Color(red: 0.973, green: 0.98, blue: 0.988)
+    static let pageBackground = Color(red: 0.961, green: 0.969, blue: 0.984)
+}
+
+private extension View {
+    @ViewBuilder
+    func customerNavigationLightScheme() -> some View {
+        #if os(iOS)
+        self.toolbarColorScheme(.light, for: .navigationBar)
+        #else
+        self
+        #endif
     }
 }
 
