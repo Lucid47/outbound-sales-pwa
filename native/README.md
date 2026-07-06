@@ -2,6 +2,20 @@
 
 이 폴더는 기존 PWA 기능과 OCR 기능을 iPhone/iPad 네이티브 앱으로 옮기기 위한 작업 공간입니다.
 
+## 필수 기준 문서
+
+네이티브 앱을 기존 PWA와 같은 기능/화면으로 만들려면 아래 문서를 먼저 확인합니다.
+
+```text
+docs/native-pwa-parity-spec.md
+docs/ui-reference.md
+docs/feature-spec.md
+docs/google-drive-sync.md
+docs/customer-list-ocr.md
+```
+
+특히 UI는 SwiftUI 기본 `List` 스타일로 대체하지 말고, `docs/ui-reference.md`와 `src/App.css`를 기준으로 색상, 여백, 카드, 버튼, 하단 탭 구조를 맞춥니다.
+
 ## 구조
 
 ```text

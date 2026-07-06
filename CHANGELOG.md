@@ -4,6 +4,9 @@
 
 ## 2026-07-06
 
+- 네이티브 앱 전환을 위한 PWA parity 사양서 추가
+- 기존 PWA UI를 네이티브 앱에서 재현하기 위한 UI 기준 문서 추가
+- native README에 필수 기준 문서와 PWA UI 참조 지침 추가
 - 네이티브 iOS 포팅 브랜치에서 SwiftUI 앱 초안 추가
   - PWA 핵심 데이터/CSV/주소 처리 로직을 `OutboundSalesCore` Swift Package로 분리
   - 고객/오늘/가져오기/OCR/기록/설정 탭을 가진 `OutboundSalesNative` SwiftUI 화면 모듈 추가

@@ -42,6 +42,8 @@ https://github.com/Lucid47/outbound-sales.git
 - [Google Drive 동기화](docs/google-drive-sync.md)
 - [고객리스트 OCR 개발 계획](docs/customer-list-ocr.md)
 - [네이티브 앱 개발환경 설치 및 설정](docs/native-app-setup.md)
+- [네이티브 앱 전환 재현 사양서](docs/native-pwa-parity-spec.md)
+- [UI 재현 기준](docs/ui-reference.md)
 - [알려진 이슈와 해결 기록](docs/known-issues.md)
 - [로드맵](ROADMAP.md)
 - [변경 이력](CHANGELOG.md)

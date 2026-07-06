@@ -10,6 +10,9 @@
 - iPhone 홈화면 추가 PWA
 - iPad
 - PC 브라우저
+- iPhone/iPad 네이티브 앱 전환 대상
+
+네이티브 앱 전환 시에는 `docs/native-pwa-parity-spec.md`와 `docs/ui-reference.md`를 함께 봅니다.
 
 ## 핵심 탭
 

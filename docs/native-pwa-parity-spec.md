@@ -1,0 +1,468 @@
+# 네이티브 앱 전환 재현 사양서
+
+이 문서는 현재 PWA 앱을 iPhone/iPad 네이티브 앱으로 전환할 때, 기능과 화면을 최대한 동일하게 재현하기 위한 기준 문서입니다.
+
+목표는 “비슷한 앱”이 아니라, 사용자가 기존 PWA에서 익힌 조작 방식과 화면 흐름을 네이티브 앱에서도 그대로 사용할 수 있게 만드는 것입니다.
+
+## 반드시 참조할 원본
+
+네이티브 앱 개발자는 아래 파일을 기준 원본으로 삼아야 합니다.
+
+```text
+기능/상태/화면 흐름: src/App.tsx
+시각 스타일/레이아웃: src/App.css
+데이터 모델: src/db/appDb.ts
+Google Drive 동기화: src/googleDriveSync.ts
+PWA manifest/icon: vite.config.ts, public/
+```
+
+현재 운영 중인 PWA:
+
+```text
+https://lucid47.github.io/outbound-sales/
+```
+
+네이티브 앱 구현 중 화면 판단이 애매할 때는 문서보다 PWA 실제 화면과 `src/App.css`를 우선합니다.
+
+## 네이티브 앱 포팅 원칙
+
+1. 기능 이름과 사용 흐름은 PWA와 동일하게 유지합니다.
+2. 하단 탭 구조는 PWA와 동일하게 유지합니다.
+3. “설정”은 상단 톱니바퀴가 아니라 하단 탭입니다.
+4. 고객 검색창은 고객 탭의 필터 아래, 고객 목록 위에 둡니다.
+5. 운전 중 손쉬운 터치를 위해 주요 버튼은 작게 만들지 않습니다.
+6. 카드 모서리는 기본 8px 계열을 유지합니다.
+7. 네이티브 기본 List만 사용해 화면을 만들면 PWA와 달라지므로, parity가 필요한 화면은 커스텀 카드/패널로 구현합니다.
+8. 지도, 고객 카드, 문자 시트, 설정 화면은 PWA의 실제 배치를 기준으로 합니다.
+9. 완료 고객은 삭제하거나 숨기는 것이 아니라 상태 전환 가능해야 합니다.
+10. 히스토리는 방문 목적보다 “고객 터치 이력”을 남기는 것이 핵심입니다.
+
+## 현재 PWA 하단 탭
+
+PWA의 현재 하단 탭은 5개입니다.
+
+```text
+오늘
+고객
+가져오기
+기록
+설정
+```
+
+네이티브 앱도 1차 parity 목표에서는 같은 5개 탭을 사용합니다.
+
+주의:
+
+- 현재 native 브랜치에는 별도 `지도` 탭이 존재할 수 있습니다.
+- PWA와 동일하게 만들려면 지도는 별도 하단 탭이 아니라 `오늘` 탭의 지도 모드와 `고객` 탭 안의 고객 위치 지도로 제공해야 합니다.
+- 지도 탭을 유지하려면 이는 PWA parity가 아니라 네이티브 확장 기능으로 분류해야 합니다.
+
+## 데이터 모델 parity
+
+PWA 데이터 모델은 `src/db/appDb.ts`가 기준입니다.
+
+### CustomerList
+
+```text
+id
+name
+companyName
+sourceFileName
+importedAt
+createdAt
+updatedAt
+```
+
+역할:
+
+- 하나의 고객사에서 받은 고객리스트 단위입니다.
+- import한 CSV 파일 하나가 하나의 CustomerList가 됩니다.
+- 수동으로 빈 고객리스트를 만들 수도 있습니다.
+- 고객, 로그, 스케줄은 반드시 customerListId로 이 리스트에 연결됩니다.
+
+### Customer
+
+```text
+id
+customerListId
+name
+phoneNumber
+address
+birthDate?
+notes
+latitude?
+longitude?
+coordinateSource?
+geocodedAt?
+geocodeQuery?
+region?
+status
+createdAt
+updatedAt
+```
+
+상태:
+
+```text
+open
+done
+hold
+needsGeocode
+```
+
+현재 주요 사용 상태:
+
+- `open`: 활성 고객
+- `done`: 완료 고객
+
+완료 고객은 되돌릴 수 있어야 합니다.
+
+### ContactLog
+
+```text
+id
+customerListId
+customerId
+type
+templateId?
+messageBody?
+result
+createdAt
+```
+
+type:
+
+```text
+call
+manualSms
+templateSms
+note
+statusComplete
+statusReopen
+```
+
+result:
+
+```text
+opened
+sentByUser
+completed
+reopened
+saved
+cancelled
+unknown
+```
+
+중요:
+
+- 실제 통화 성공 여부가 아니라 전화 버튼을 누른 사실을 남깁니다.
+- 실제 문자 발송 여부가 아니라 문자 버튼을 누른 사실을 남깁니다.
+- 고객 응대 히스토리는 ContactLog 중심으로 누적합니다.
+
+### VisitLog
+
+```text
+id
+customerListId
+customerId
+visitedAt
+result
+memo?
+createdAt
+```
+
+현재 result는 `completed` 중심입니다.
+
+### VisitSchedule
+
+```text
+id
+customerListId
+date
+title
+createdAt
+updatedAt
+```
+
+### VisitScheduleItem
+
+```text
+id
+scheduleId
+customerListId
+customerId
+orderIndex
+status
+completedAt?
+```
+
+status:
+
+```text
+pending
+completed
+skipped
+hold
+```
+
+### MessageTemplate
+
+```text
+id
+title
+body
+isDefault
+createdAt
+updatedAt
+```
+
+기본 템플릿도 수정 가능해야 합니다.
+
+## 저장과 동기화 parity
+
+PWA:
+
+```text
+로컬 저장: IndexedDB + Dexie
+동기화: Google Drive appDataFolder
+사용자 백업: 일반 Google Drive JSON 파일
+```
+
+네이티브 1차:
+
+```text
+로컬 저장: 앱 샌드박스 Application Support JSON
+백업: JSON 파일 내보내기/가져오기
+동기화: 이후 Google Drive 연결
+```
+
+네이티브가 동일 기능을 갖추려면 아래 동작을 보장해야 합니다.
+
+- 앱 재실행 시 이전 데이터 자동 로드
+- 고객리스트, 고객, 로그, 스케줄, 템플릿 모두 저장
+- 고객리스트 삭제 시 해당 리스트의 고객, 로그, 스케줄도 함께 삭제
+- Google Drive 동기화 연결 전에도 로컬 데이터는 유지
+- 새 기기 복원 흐름 제공
+
+## CSV import parity
+
+PWA 요구사항:
+
+- CSV 첫 행을 헤더로 해석합니다.
+- 헤더명으로 열 의미를 자동 매핑합니다.
+- 사용자가 매핑을 확인/수정할 수 있습니다.
+- 고객사 이름과 고객리스트 이름은 사용자가 입력합니다.
+- 기본값을 강제로 넣지 않고 placeholder만 보여줍니다.
+
+필드 alias:
+
+```text
+name: 고객명, 고객이름, 이름, 성명, name
+phoneNumber: 연락처, 전화번호, 휴대폰, 핸드폰, 휴대전화, mobile, phone, tel, telephone
+address: 주소, 우편물주소, 도로명주소, 지번주소, address
+birthDate: 생년월일, 생일, 출생일, birth, birthday
+notes: 기타사항, 비고, 메모, notes, memo
+latitude: 위도, lat, latitude
+longitude: 경도, lng, lon, longitude
+```
+
+헤더 정규화:
+
+- 공백 제거
+- `_` 제거
+- `-` 제거
+- 소문자화
+- 끝 숫자 제거
+
+예:
+
+```text
+핸드폰1 → 핸드폰
+핸드폰2 → 핸드폰
+```
+
+고객 저장 조건:
+
+- 이름이 없으면 저장하지 않습니다.
+- 연락처와 주소가 모두 없으면 저장하지 않습니다.
+- 생년월일은 가능한 경우 ISO 형태로 정규화합니다.
+
+## 주소 처리 parity
+
+주소 처리는 `src/App.tsx`의 주소 정규화 함수와 `native/OutboundSalesCore/Sources/OutboundSalesCore/AddressUtilities.swift`를 기준으로 합니다.
+
+### 그룹화 주소
+
+지역별 그룹화는 도로명까지만 사용합니다.
+
+예:
+
+```text
+산성대로 123 → 산성대로
+공원로 360 → 공원로
+```
+
+### 지도/길찾기 주소
+
+지도 검색과 티맵 전달은 `도로명 + 건물번호`까지만 사용합니다.
+
+예:
+
+```text
+경기도 성남시 수정구 산성대로 123, 302호 → 산성대로 123
+```
+
+아래 항목은 제거합니다.
+
+- 동/호수
+- 괄호 안 설명
+- 고객명
+- 불필요한 상세 설명
+
+## 지도 parity
+
+PWA 지도:
+
+- Leaflet + OpenStreetMap
+- 고객명 라벨로 표시
+- 완료/미완료/예정 상태를 라벨에 반영
+- 라벨 터치 시 작은 고객 카드 팝업 표시
+- 팝업에서 전화, 문자, 길찾기, 이력, 완료/완료취소, 스케줄 추가 가능
+- 내 위치 버튼
+- 지도 하단에 표시 실패 고객과 원인 표시
+
+네이티브 지도:
+
+- MapKit 사용
+- 단순 Marker만으로 끝내지 말고 고객명 라벨과 상태 표시를 우선 구현합니다.
+- 선택한 고객 라벨에서 PWA 팝업 카드와 같은 액션을 제공해야 합니다.
+- 지도 위치 누락 고객 목록을 고객 탭 지도 아래에 표시해야 합니다.
+- 별도 지도 탭은 확장 기능으로만 유지합니다.
+
+## 전화/문자 parity
+
+전화:
+
+- PWA는 `tel:` 링크를 사용합니다.
+- 네이티브는 `tel:` URL 또는 적절한 시스템 URL open을 사용합니다.
+- 전화 버튼을 누르면 즉시 ContactLog `call/opened`를 남깁니다.
+
+문자:
+
+- PWA는 `sms:` 링크를 사용합니다.
+- iOS 정책상 자동 문자 발송은 불가능합니다.
+- 템플릿 문자는 본문을 클립보드에 복사한 후 문자앱을 엽니다.
+- 사용자 문자는 본문 자동 입력 없이 문자앱만 엽니다.
+- 문자 버튼을 누르면 ContactLog를 남깁니다.
+- 실제 발송 성공 여부를 확인하려고 하지 않습니다.
+
+중요:
+
+- 문자앱 실행 시 현재 고객 번호만 사용해야 합니다.
+- 이전 고객 번호가 재사용되지 않도록 버튼 클릭 이벤트와 대상 고객 상태를 분리합니다.
+
+## 완료/히스토리 parity
+
+완료 처리는 단순 방문 완료가 아니라 고객 서비스 상태 변경입니다.
+
+완료 처리 시:
+
+- Customer.status = `done`
+- ContactLog type = `statusComplete`
+- result = `completed`
+- 오늘 스케줄 항목이 있으면 `completed` 처리
+
+완료 취소 시:
+
+- Customer.status = `open`
+- ContactLog type = `statusReopen`
+- result = `reopened`
+- 오늘 스케줄 완료 항목은 다시 `pending` 처리
+
+메모:
+
+- 메모는 ContactLog type `note`로 저장합니다.
+- 프리셋:
+  - 전화하였으나 받지 않음
+  - 문자로 연락함
+  - 방문하였으나 부재
+  - 사용자 템플릿
+
+기록 탭:
+
+- 전체 고객 수
+- 터치 고객 수
+- 완료 고객 수
+- 고객별 히스토리
+- 누적 터치/상담 히스토리
+- 항목 터치 시 해당 고객 전체 히스토리 팝업
+
+## Google Drive parity
+
+현재 PWA OAuth:
+
+- Google OAuth 앱은 Production 상태
+- `VITE_GOOGLE_CLIENT_ID`는 GitHub Variables로 주입
+- 사용자가 각자 본인 Google Drive에 저장
+
+네이티브에서 동일 방향으로 가려면:
+
+- Google Sign-In 또는 OAuth 흐름 필요
+- Drive appDataFolder에 동일한 백업 JSON 구조 저장
+- PWA와 네이티브가 같은 계정 데이터와 호환되려면 JSON schema를 유지해야 함
+- 병합 정책도 PWA와 동일해야 함
+
+현재 병합 정책:
+
+- ID 기준 병합
+- 같은 ID는 최신 수정 시각 우선
+- 로그성 데이터는 ID 기준 합치기
+- `Drive 데이터를 이 기기에 가져오기`는 병합이 아니라 로컬 교체 복원
+
+## OCR parity와 확장
+
+OCR은 PWA 본기능 parity 이후 확장 기능입니다.
+
+현재 OCR 계획:
+
+- Mac CLI에서 먼저 Apple Vision OCR 검증
+- 이미지 파일 입력
+- OCR 텍스트와 좌표 추출
+- y좌표 기준 행 묶기
+- x좌표 기준 열 묶기
+- 셀 배열 생성
+- 사용자가 열 이름 지정
+- CSV 생성
+
+네이티브 확장:
+
+- iPhone/iPad 문서 스캔: VisionKit
+- OCR: Apple Vision
+- 표 복원과 CSV 생성은 Mac CLI 코어 로직 재사용
+- 최종 결과는 기존 CSV import와 같은 CustomerList/Customer 저장 흐름으로 연결
+
+자세한 계획은 `docs/customer-list-ocr.md`를 기준으로 합니다.
+
+## 네이티브 구현 우선순위
+
+1. PWA 데이터 모델과 JSON 저장 호환
+2. 하단 5탭 구조 parity
+3. 고객리스트/고객/스케줄/기록 기본 화면 parity
+4. 전화/문자/길찾기 액션 parity
+5. 완료/완료취소/메모/히스토리 parity
+6. 고객 탭 지도와 지도 팝업 parity
+7. Google Drive 동기화 parity
+8. OCR import 확장
+
+## 완료 기준
+
+네이티브 앱이 PWA와 동일하다고 판단하려면 아래 조건을 만족해야 합니다.
+
+- 같은 CSV를 가져왔을 때 같은 고객 수와 같은 필드가 저장됩니다.
+- 고객 탭에서 같은 리스트/스케줄/지도/필터/검색 순서가 보입니다.
+- 카드형/목록형 전환이 iPhone/iPad에서 동작합니다.
+- 전화/문자/길찾기 버튼이 같은 고객을 대상으로 실행됩니다.
+- 완료/완료취소가 히스토리에 남고 되돌릴 수 있습니다.
+- 기록 탭의 카운트와 히스토리가 PWA와 같은 기준으로 계산됩니다.
+- JSON 백업을 통해 PWA와 네이티브 간 데이터 교환이 가능합니다.
+- 화면 색상, 여백, 카드 모서리, 버튼 높이, 하단 탭 구조가 `docs/ui-reference.md`의 기준을 따릅니다.
