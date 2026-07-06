@@ -83,7 +83,10 @@ native/
 - CSV 텍스트 붙여넣기 import
 - Apple Vision 기반 사진 OCR import
   - Swift CLI에서 검증한 OCR 표 복원 코어 로직을 `OutboundSalesCore`로 이동
-  - 이미지 선택, 표 OCR, CSV 미리보기/수정, 고객리스트 저장 흐름 연결
+  - iPhone/iPad에서 카메라 촬영 또는 사진앱 선택, 표 OCR, CSV 미리보기/수정, 고객리스트 저장 흐름 연결
+- 문자 템플릿 선택 시트
+  - 고객 카드, 고객 상세, 지도 팝업의 문자 버튼은 먼저 일반 문자/템플릿 문자 선택 화면을 표시
+  - 템플릿 문자는 본문을 클립보드에 복사한 뒤 문자앱을 실행
 - iPhone/iPad용 Xcode 앱 프로젝트 초안
 - 앱 시작 화면과 SwiftUI 루트 화면 연결
 - 고객리스트/고객 데이터를 앱 전용 JSON 파일로 로컬 저장

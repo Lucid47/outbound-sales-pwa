@@ -1,6 +1,10 @@
 import OutboundSalesCore
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import PhotosUI
+import UIKit
+#endif
 
 struct ImportView: View {
     @EnvironmentObject private var state: NativeAppState
@@ -109,7 +113,12 @@ enum ImportFileType {
 
 struct OCRImportView: View {
     @EnvironmentObject private var state: NativeAppState
+    #if os(iOS)
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showingCamera = false
+    #else
     @State private var showingImageImporter = false
+    #endif
     @State private var companyName = ""
     @State private var listName = ""
     @State private var headers = ""
@@ -120,11 +129,38 @@ struct OCRImportView: View {
             TextField("고객사 이름", text: $companyName)
             TextField("고객리스트 이름", text: $listName)
             TextField("열 이름 예: 이름,전화번호,주소,메모", text: $headers)
+
+            #if os(iOS)
+            HStack(spacing: 8) {
+                Button {
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        showingCamera = true
+                    } else {
+                        state.ocrMessage = "이 기기에서는 카메라를 사용할 수 없습니다."
+                    }
+                } label: {
+                    Label("카메라로 촬영", systemImage: "camera")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                PhotosPicker(
+                    selection: $selectedPhotoItem,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label("사진앱에서 선택", systemImage: "photo.on.rectangle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            #else
             Button {
                 showingImageImporter = true
             } label: {
-                Label("사진 선택 후 OCR 실행", systemImage: "photo.on.rectangle")
+                Label("이미지 파일 선택 후 OCR 실행", systemImage: "photo.on.rectangle")
             }
+            #endif
 
             if !csvText.isEmpty {
                 TextEditor(text: $csvText)
@@ -142,6 +178,17 @@ struct OCRImportView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+        #if os(iOS)
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task { await recognizePhotoItem(item) }
+        }
+        .sheet(isPresented: $showingCamera) {
+            CameraCaptureView { url in
+                Task { await recognizeImage(at: url) }
+            }
+        }
+        #else
         .fileImporter(
             isPresented: $showingImageImporter,
             allowedContentTypes: [.image],
@@ -161,8 +208,97 @@ struct OCRImportView: View {
                 }
             }
         }
+        #endif
+    }
+
+    private var parsedHeaders: [String] {
+        headers
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func recognizeImage(at url: URL) async {
+        if let csv = await state.recognizeOCRCSV(url: url, headers: parsedHeaders) {
+            csvText = csv
+        }
+    }
+
+    #if os(iOS)
+    private func recognizePhotoItem(_ item: PhotosPickerItem) async {
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                state.ocrMessage = "사진을 읽지 못했습니다."
+                return
+            }
+            let url = try writeTemporaryImage(data: data, extension: "image")
+            await recognizeImage(at: url)
+        } catch {
+            state.ocrMessage = "사진을 읽지 못했습니다."
+        }
+    }
+
+    private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ocr-\(UUID().uuidString)")
+            .appendingPathExtension(pathExtension)
+        try data.write(to: url, options: [.atomic])
+        return url
+    }
+    #endif
+}
+
+#if os(iOS)
+struct CameraCaptureView: UIViewControllerRepresentable {
+    @Environment(\.dismiss) private var dismiss
+    let onCapture: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCapture: onCapture, dismiss: dismiss)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let onCapture: (URL) -> Void
+        let dismiss: DismissAction
+
+        init(onCapture: @escaping (URL) -> Void, dismiss: DismissAction) {
+            self.onCapture = onCapture
+            self.dismiss = dismiss
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            defer { dismiss() }
+            guard let image = info[.originalImage] as? UIImage,
+                  let data = image.jpegData(compressionQuality: 0.92) else {
+                return
+            }
+            do {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("camera-ocr-\(UUID().uuidString)")
+                    .appendingPathExtension("jpg")
+                try data.write(to: url, options: [.atomic])
+                onCapture(url)
+            } catch {
+                return
+            }
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            dismiss()
+        }
     }
 }
+#endif
 
 struct AddCustomerView: View {
     @EnvironmentObject private var state: NativeAppState

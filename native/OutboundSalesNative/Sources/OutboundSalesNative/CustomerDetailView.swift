@@ -13,6 +13,7 @@ struct CustomerDetailView: View {
     @Environment(\.openURL) private var openURL
     let customerId: String
     @State private var showingEdit = false
+    @State private var showingMessageSheet = false
     @State private var noteText = ""
     @State private var visitMemo = ""
 
@@ -50,10 +51,7 @@ struct CustomerDetailView: View {
                         .disabled(!hasDialablePhone(customer.phoneNumber))
 
                         Button {
-                            state.recordContact(customer: customer, type: .manualSms)
-                            if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
-                                openURL(url)
-                            }
+                            showingMessageSheet = true
                         } label: {
                             Label("문자", systemImage: "message")
                         }
@@ -66,23 +64,6 @@ struct CustomerDetailView: View {
                         }
                         .disabled(customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil)
                     }
-
-                    Section("템플릿 문자") {
-                        ForEach(state.messageTemplates) { template in
-                            Button {
-                                let body = template.body.replacingOccurrences(of: "{고객명}", with: customer.name)
-                                copyToClipboard(body)
-                                state.recordContact(customer: customer, type: .templateSms, result: .opened, messageBody: body, templateId: template.id)
-                                if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
-                                    openURL(url)
-                                }
-                            } label: {
-                                Label(template.title, systemImage: "text.bubble")
-                            }
-                            .disabled(!hasDialablePhone(customer.phoneNumber))
-                        }
-                    }
-
                     Section("상태와 스케줄") {
                         Button {
                             state.toggleDone(customer)
@@ -155,6 +136,10 @@ struct CustomerDetailView: View {
                     EditCustomerView(customer: customer)
                         .environmentObject(state)
                 }
+                .sheet(isPresented: $showingMessageSheet) {
+                    MessageComposerSheet(customer: customer)
+                        .environmentObject(state)
+                }
             } else {
                 ContentUnavailableView("고객을 찾을 수 없습니다.", systemImage: "person.crop.circle.badge.questionmark")
             }
@@ -186,15 +171,6 @@ struct CustomerDetailView: View {
                 }
             }
         }
-    }
-
-    private func copyToClipboard(_ value: String) {
-        #if os(iOS)
-        UIPasteboard.general.string = value
-        #elseif os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-        #endif
     }
 }
 

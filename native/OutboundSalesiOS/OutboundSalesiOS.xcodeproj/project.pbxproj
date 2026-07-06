@@ -259,6 +259,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Outbound Sales";
+				INFOPLIST_KEY_NSCameraUsageDescription = "고객리스트 문서를 촬영해 OCR로 가져오기 위해 카메라를 사용합니다.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "촬영한 고객리스트 사진을 OCR로 가져오기 위해 사진 보관함을 사용합니다.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -290,6 +292,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Outbound Sales";
+				INFOPLIST_KEY_NSCameraUsageDescription = "고객리스트 문서를 촬영해 OCR로 가져오기 위해 카메라를 사용합니다.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "촬영한 고객리스트 사진을 OCR로 가져오기 위해 사진 보관함을 사용합니다.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIRequiresFullScreen = NO;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

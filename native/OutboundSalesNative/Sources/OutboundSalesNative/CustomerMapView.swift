@@ -163,6 +163,7 @@ private struct MapCustomerPanel: View {
     let onClose: () -> Void
     let onNote: () -> Void
     let onHistory: () -> Void
+    @State private var showingMessageSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -190,7 +191,7 @@ private struct MapCustomerPanel: View {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 panelButton("전화", "phone") { callCustomer() }
                     .disabled(!hasDialablePhone(customer.phoneNumber))
-                panelButton("문자", "message") { smsCustomer() }
+                panelButton("문자", "message") { showingMessageSheet = true }
                     .disabled(!hasDialablePhone(customer.phoneNumber))
                 panelButton("길찾기", "location") { navigateCustomer() }
                     .disabled(customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil)
@@ -217,6 +218,10 @@ private struct MapCustomerPanel: View {
         .padding(14)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $showingMessageSheet) {
+            MessageComposerSheet(customer: customer)
+                .environmentObject(state)
+        }
     }
 
     private var scheduleText: String {
@@ -237,13 +242,6 @@ private struct MapCustomerPanel: View {
     private func callCustomer() {
         state.recordContact(customer: customer, type: .call)
         if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
-            openURL(url)
-        }
-    }
-
-    private func smsCustomer() {
-        state.recordContact(customer: customer, type: .manualSms)
-        if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
             openURL(url)
         }
     }

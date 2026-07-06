@@ -8,6 +8,10 @@ struct CustomerActionCard: View {
     let customer: Customer
     let compact: Bool
     @State private var showingEdit = false
+    @State private var showingMessageSheet = false
+
+    private let primaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+    private let secondaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 8 : 12) {
@@ -42,61 +46,52 @@ struct CustomerActionCard: View {
                     .clipShape(Capsule())
             }
 
-            HStack(spacing: 8) {
-                quickButton("전화", "phone.fill") {
+            LazyVGrid(columns: primaryColumns, spacing: 8) {
+                actionButton("전화", "phone.fill", color: Color(red: 0.122, green: 0.435, blue: 0.922)) {
                     callCustomer()
                 }
                 .disabled(!hasDialablePhone(customer.phoneNumber))
 
-                quickButton("문자", "message.fill") {
-                    smsCustomer()
+                actionButton("문자", "message.fill", color: Color(red: 0.02, green: 0.52, blue: 0.62)) {
+                    showingMessageSheet = true
                 }
                 .disabled(!hasDialablePhone(customer.phoneNumber))
 
-                quickButton("길찾기", "location.fill") {
+                actionButton("길찾기", "location.fill", color: Color(red: 0.31, green: 0.36, blue: 0.86)) {
                     navigateCustomer()
                 }
                 .disabled(customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil)
             }
 
-            HStack(spacing: 8) {
-                Button {
+            LazyVGrid(columns: secondaryColumns, spacing: 8) {
+                actionButton("수정", "pencil", color: Color(red: 0.40, green: 0.46, blue: 0.56)) {
                     showingEdit = true
-                } label: {
-                    Label("수정", systemImage: "pencil")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
 
                 NavigationLink {
                     CustomerDetailView(customerId: customer.id)
                         .environmentObject(state)
                 } label: {
                     Label("상세", systemImage: "calendar.badge.clock")
-                        .frame(maxWidth: .infinity)
+                        .actionButtonLabel()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ColoredActionButtonStyle(color: Color(red: 0.44, green: 0.35, blue: 0.82)))
 
-                Button {
+                actionButton("스케줄", "calendar.badge.plus", color: Color(red: 0.84, green: 0.48, blue: 0.12)) {
                     state.addToTodaySchedule(customer)
-                } label: {
-                    Label("스케줄", systemImage: "calendar.badge.plus")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
 
-                Button {
+                actionButton(
+                    customer.status == .done ? "완료취소" : "완료",
+                    customer.status == .done ? "arrow.uturn.backward" : "checkmark",
+                    color: customer.status == .done ? Color(red: 0.45, green: 0.49, blue: 0.55) : Color(red: 0.12, green: 0.74, blue: 0.32)
+                ) {
                     if customer.status == .done {
                         state.toggleDone(customer)
                     } else {
                         state.completeVisit(customer: customer)
                     }
-                } label: {
-                    Label(customer.status == .done ? "완료취소" : "완료", systemImage: customer.status == .done ? "arrow.uturn.backward" : "checkmark")
-                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(customer.status == .done ? .gray : .green)
             }
         }
         .padding(compact ? 10 : 12)
@@ -108,6 +103,10 @@ struct CustomerActionCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .sheet(isPresented: $showingEdit) {
             EditCustomerView(customer: customer)
+                .environmentObject(state)
+        }
+        .sheet(isPresented: $showingMessageSheet) {
+            MessageComposerSheet(customer: customer)
                 .environmentObject(state)
         }
     }
@@ -135,26 +134,17 @@ struct CustomerActionCard: View {
         }
     }
 
-    private func quickButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+    private func actionButton(_ title: String, _ icon: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.subheadline.weight(.bold))
-                .frame(maxWidth: .infinity, minHeight: 42)
+                .actionButtonLabel()
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Color(red: 0.122, green: 0.435, blue: 0.922))
+        .buttonStyle(ColoredActionButtonStyle(color: color))
     }
 
     private func callCustomer() {
         state.recordContact(customer: customer, type: .call)
         if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
-            openURL(url)
-        }
-    }
-
-    private func smsCustomer() {
-        state.recordContact(customer: customer, type: .manualSms)
-        if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
             openURL(url)
         }
     }
@@ -191,6 +181,28 @@ struct CustomerActionCard: View {
            let url = URL(string: "http://maps.apple.com/?daddr=\(encoded)") {
             openURL(url)
         }
+    }
+}
+
+private extension Label where Title == Text, Icon == Image {
+    func actionButtonLabel() -> some View {
+        self
+            .font(.subheadline.weight(.heavy))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ColoredActionButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(color.opacity(configuration.isPressed ? 0.78 : 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
