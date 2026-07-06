@@ -29,3 +29,7 @@ tools/customer-list-ocr-cli/.build/
 tools/customer-list-ocr-cli/ocr-output/
 tools/customer-list-ocr-cli/test-data/private/
 tools/customer-list-ocr-cli/test-data/customer/
+
+# Native app local build output
+native/**/.build/
+native/**/DerivedData/
