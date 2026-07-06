@@ -33,6 +33,23 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(rows[1][1], "문자, 전화 필요")
     }
 
+    func testDecodesCP949CSVText() throws {
+        let data = Data([
+            0xc0, 0xcc, 0xb8, 0xa7, 0x2c, 0xc0, 0xfc, 0xc8, 0xad, 0xb9, 0xf8, 0xc8,
+            0xa3, 0x2c, 0xc1, 0xd6, 0xbc, 0xd2, 0x0a, 0xc8, 0xab, 0xb1, 0xe6, 0xb5,
+            0xbf, 0x2c, 0x30, 0x31, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+            0x38, 0x2c, 0xbc, 0xad, 0xbf, 0xef, 0x0a
+        ])
+
+        let parsed = try parseCSV(decodeCSVText(data: data))
+
+        XCTAssertEqual(parsed.headers, ["이름", "전화번호", "주소"])
+        XCTAssertEqual(parsed.rows.first, ["홍길동", "01012345678", "서울"])
+        XCTAssertEqual(parsed.mapping[.name], 0)
+        XCTAssertEqual(parsed.mapping[.phoneNumber], 1)
+        XCTAssertEqual(parsed.mapping[.address], 2)
+    }
+
     func testCreatesCustomersFromParsedCsv() throws {
         let parsed = try parseCSV("""
         이름,전화번호,주소

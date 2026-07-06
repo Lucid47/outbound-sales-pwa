@@ -14,6 +14,35 @@ public struct ParsedCSV: Equatable, Sendable {
 
 public enum CSVImportError: Error, Equatable, Sendable {
     case empty
+    case unsupportedEncoding
+}
+
+public func decodeCSVText(data: Data) throws -> String {
+    if let utf8 = String(data: data, encoding: .utf8) {
+        return removeByteOrderMark(from: utf8)
+    }
+
+    if hasUTF16ByteOrderMark(data) {
+        for encoding in [String.Encoding.utf16, .utf16LittleEndian, .utf16BigEndian] {
+            if let text = String(data: data, encoding: encoding) {
+                return removeByteOrderMark(from: text)
+            }
+        }
+    }
+
+    for encoding in [koreanEncoding(.dosKorean), koreanEncoding(.EUC_KR)] {
+        if let text = String(data: data, encoding: encoding) {
+            return removeByteOrderMark(from: text)
+        }
+    }
+
+    for encoding in [String.Encoding.utf16, .utf16LittleEndian, .utf16BigEndian] {
+        if let text = String(data: data, encoding: encoding) {
+            return removeByteOrderMark(from: text)
+        }
+    }
+
+    throw CSVImportError.unsupportedEncoding
 }
 
 public func parseCSV(_ text: String, firstRowIsHeader: Bool = true) throws -> ParsedCSV {
@@ -116,4 +145,16 @@ func escapeCSVField(_ value: String) -> String {
     let needsQuotes = value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r")
     let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
     return needsQuotes ? "\"\(escaped)\"" : escaped
+}
+
+private func koreanEncoding(_ encoding: CFStringEncodings) -> String.Encoding {
+    String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(encoding.rawValue)))
+}
+
+private func hasUTF16ByteOrderMark(_ data: Data) -> Bool {
+    data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff])
+}
+
+private func removeByteOrderMark(from text: String) -> String {
+    text.hasPrefix("\u{feff}") ? String(text.dropFirst()) : text
 }

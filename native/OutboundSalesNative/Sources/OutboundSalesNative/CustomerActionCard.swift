@@ -159,14 +159,20 @@ struct CustomerActionCard: View {
     }
 
     private func tmapURLForCustomer() -> URL {
-        let goalName = (customer.name.isEmpty ? customer.address : customer.name)
+        let routeLabel = normalizedDestination().isEmpty ? customer.name : normalizedDestination()
+        let goalName = routeLabel
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         if let latitude = customer.latitude, let longitude = customer.longitude {
             return URL(string: "tmap://route?goalx=\(longitude)&goaly=\(latitude)&goalname=\(goalName)")!
         }
-        let destination = (normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address))
+        let destination = (normalizedDestination().isEmpty ? customer.name : normalizedDestination())
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         return URL(string: "tmap://?search=\(destination)")!
+    }
+
+    private func normalizedDestination() -> String {
+        let normalized = normalizeAddressForMapSearch(customer.address)
+        return normalized.isEmpty ? customer.address : normalized
     }
 
     private func openAppleMaps() {

@@ -112,12 +112,13 @@ public final class NativeAppState: ObservableObject {
         persist()
     }
 
-    public func createEmptyList(companyName: String, listName: String) {
+    public func createEmptyList(listName: String) {
         let now = Date()
+        let resolvedListName = listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "새 고객리스트" : listName
         let list = CustomerList(
             id: UUID().uuidString,
-            name: listName.isEmpty ? "새 고객리스트" : listName,
-            companyName: companyName.isEmpty ? "고객사 미지정" : companyName,
+            name: resolvedListName,
+            companyName: resolvedListName,
             sourceFileName: "",
             importedAt: now,
             createdAt: now,
@@ -128,21 +129,22 @@ public final class NativeAppState: ObservableObject {
         persist()
     }
 
-    public func importCSV(text: String, companyName: String, listName: String, sourceFileName: String = "import.csv") {
+    public func importCSV(text: String, listName: String, sourceFileName: String = "import.csv") {
         do {
             let parsed = try parseCSV(text)
-            importParsedCSV(parsed, companyName: companyName, listName: listName, sourceFileName: sourceFileName)
+            importParsedCSV(parsed, listName: listName, sourceFileName: sourceFileName)
         } catch {
             importMessage = "CSV를 읽지 못했습니다."
         }
     }
 
-    public func importParsedCSV(_ parsed: ParsedCSV, companyName: String, listName: String, sourceFileName: String = "import.csv") {
+    public func importParsedCSV(_ parsed: ParsedCSV, listName: String, sourceFileName: String = "import.csv") {
         let now = Date()
+        let resolvedListName = listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? sourceFileName : listName
         let list = CustomerList(
             id: UUID().uuidString,
-            name: listName.isEmpty ? sourceFileName : listName,
-            companyName: companyName.isEmpty ? "고객사 미지정" : companyName,
+            name: resolvedListName,
+            companyName: resolvedListName,
             sourceFileName: sourceFileName,
             importedAt: now,
             createdAt: now,
@@ -159,7 +161,7 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
-    public func importFile(url: URL, companyName: String, listName: String) {
+    public func importFile(url: URL, listName: String) {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
             if accessGranted {
@@ -176,8 +178,8 @@ public final class NativeAppState: ObservableObject {
         }
 
         do {
-            let text = try String(contentsOf: url, encoding: .utf8)
-            importCSV(text: text, companyName: companyName, listName: listName, sourceFileName: fileName)
+            let text = try decodeCSVText(data: Data(contentsOf: url))
+            importCSV(text: text, listName: listName, sourceFileName: fileName)
         } catch {
             importMessage = "파일을 읽지 못했습니다."
         }

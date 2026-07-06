@@ -147,7 +147,9 @@ struct CustomerDetailView: View {
     }
 
     private func openDirections(_ customer: Customer) {
-        let goalName = (customer.name.isEmpty ? customer.address : customer.name)
+        let destination = normalizedDestination(for: customer)
+        let routeLabel = destination.isEmpty ? customer.name : destination
+        let goalName = routeLabel
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         if let latitude = customer.latitude, let longitude = customer.longitude {
             if let tmapURL = URL(string: "tmap://route?goalx=\(longitude)&goaly=\(latitude)&goalname=\(goalName)") {
@@ -162,7 +164,7 @@ struct CustomerDetailView: View {
             return
         }
 
-        let query = normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address)
+        let query = destination.isEmpty ? customer.name : destination
         if let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
            let tmapURL = URL(string: "tmap://?search=\(encoded)") {
             openURL(tmapURL) { accepted in
@@ -171,6 +173,11 @@ struct CustomerDetailView: View {
                 }
             }
         }
+    }
+
+    private func normalizedDestination(for customer: Customer) -> String {
+        let normalized = normalizeAddressForMapSearch(customer.address)
+        return normalized.isEmpty ? customer.address : normalized
     }
 }
 

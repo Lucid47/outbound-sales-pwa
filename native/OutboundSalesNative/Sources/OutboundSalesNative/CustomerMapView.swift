@@ -247,13 +247,14 @@ private struct MapCustomerPanel: View {
     }
 
     private func navigateCustomer() {
-        let goalName = (customer.name.isEmpty ? customer.address : customer.name)
+        let routeLabel = normalizedDestination().isEmpty ? customer.name : normalizedDestination()
+        let goalName = routeLabel
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let url: URL
         if let latitude = customer.latitude, let longitude = customer.longitude {
             url = URL(string: "tmap://route?goalx=\(longitude)&goaly=\(latitude)&goalname=\(goalName)")!
         } else {
-            let destination = (normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address))
+            let destination = (normalizedDestination().isEmpty ? customer.name : normalizedDestination())
                 .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
             url = URL(string: "tmap://?search=\(destination)")!
         }
@@ -262,6 +263,11 @@ private struct MapCustomerPanel: View {
                 openAppleMaps()
             }
         }
+    }
+
+    private func normalizedDestination() -> String {
+        let normalized = normalizeAddressForMapSearch(customer.address)
+        return normalized.isEmpty ? customer.address : normalized
     }
 
     private func openAppleMaps() {

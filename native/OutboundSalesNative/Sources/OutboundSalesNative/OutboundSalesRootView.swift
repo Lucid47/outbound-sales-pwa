@@ -200,7 +200,7 @@ struct ActiveListPanel: View {
                     Text(state.selectedList?.name ?? "고객리스트 없음")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text(state.selectedList?.companyName ?? "가져오기 탭에서 고객리스트를 생성하세요.")
+                    Text(activeListSubtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.78))
                 }
@@ -229,6 +229,13 @@ struct ActiveListPanel: View {
         .padding(12)
         .background(Color(red: 0.086, green: 0.125, blue: 0.196))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var activeListSubtitle: String {
+        guard let selectedList = state.selectedList else {
+            return "가져오기 탭에서 고객리스트를 생성하세요."
+        }
+        return selectedList.sourceFileName.isEmpty ? "직접 생성한 고객리스트" : selectedList.sourceFileName
     }
 }
 

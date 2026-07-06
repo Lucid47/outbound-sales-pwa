@@ -8,36 +8,32 @@ import UIKit
 
 struct ImportView: View {
     @EnvironmentObject private var state: NativeAppState
-    @State private var companyName = ""
-    @State private var listName = ""
     @State private var showingFileImporter = false
     @State private var showingCreateList = false
     @State private var showingAddCustomer = false
-    @State private var csvPreviewText = ""
-    @State private var csvPreviewSourceFileName = "붙여넣기.csv"
-    @State private var csvFirstRowIsHeader = true
-    @State private var csvPreview: ParsedCSV?
-    @State private var csvText = """
+    @State private var importDraft: ImportDraft?
+    @State private var pastedCSV = """
     이름,전화번호,주소,메모
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
     """
+    #if os(iOS)
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showingCamera = false
+    #else
+    @State private var showingImageImporter = false
+    #endif
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("고객리스트 정보") {
-                    TextField("고객사 이름", text: $companyName)
-                    TextField("고객리스트 이름", text: $listName)
-                }
-
                 Section("파일에서 가져오기") {
                     Button {
                         showingFileImporter = true
                     } label: {
-                        Label("CSV 파일 선택 후 매핑 확인", systemImage: "doc.badge.plus")
+                        Label("CSV 파일 선택", systemImage: "doc.badge.plus")
                     }
 
-                    Label("엑셀 파일(.xlsx)은 다음 단계에서 연결합니다.", systemImage: "tablecells")
+                    Label("파일을 읽은 뒤 컬럼 매핑 팝업을 표시합니다.", systemImage: "tablecells")
                         .foregroundStyle(.secondary)
                 }
 
@@ -57,57 +53,52 @@ struct ImportView: View {
                 }
 
                 Section("사진에서 가져오기") {
-                    OCRImportView()
-                        .environmentObject(state)
+                    #if os(iOS)
+                    HStack(spacing: 8) {
+                        Button {
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                showingCamera = true
+                            } else {
+                                state.ocrMessage = "이 기기에서는 카메라를 사용할 수 없습니다."
+                            }
+                        } label: {
+                            Label("카메라", systemImage: "camera")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        PhotosPicker(
+                            selection: $selectedPhotoItem,
+                            matching: .images,
+                            photoLibrary: .shared()
+                        ) {
+                            Label("사진앱", systemImage: "photo.on.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    #else
+                    Button {
+                        showingImageImporter = true
+                    } label: {
+                        Label("이미지 파일 선택", systemImage: "photo.on.rectangle")
+                    }
+                    #endif
+
+                    Text(state.ocrMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("CSV 텍스트 붙여넣기") {
-                    TextEditor(text: $csvText)
+                    TextEditor(text: $pastedCSV)
                         .font(.system(.body, design: .monospaced))
                         .frame(minHeight: 180)
 
                     Button {
-                        loadCSVPreview(text: csvText, sourceFileName: "붙여넣기.csv")
+                        presentMappingPopup(text: pastedCSV, sourceFileName: "붙여넣기.csv", sourceTitle: "텍스트 붙여넣기")
                     } label: {
-                        Label("붙여넣은 CSV 분석", systemImage: "tablecells")
-                    }
-                }
-
-                if let parsed = csvPreview {
-                    Section {
-                        Toggle("첫 행을 헤더로 사용", isOn: $csvFirstRowIsHeader)
-
-                        ForEach(FieldKey.allCases, id: \.self) { field in
-                            Picker(fieldLabel(field), selection: mappingSelection(field)) {
-                                Text("사용 안 함").tag(-1)
-                                ForEach(parsed.headers.indices, id: \.self) { index in
-                                    Text("\(index + 1). \(parsed.headers[index])").tag(index)
-                                }
-                            }
-                        }
-
-                        if let firstRow = parsed.rows.first {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("첫 데이터 미리보기")
-                                    .font(.caption.weight(.semibold))
-                                ForEach(parsed.headers.indices, id: \.self) { index in
-                                    Text("\(index + 1). \(parsed.headers[index]): \(index < firstRow.count ? firstRow[index] : "")")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-
-                        Button {
-                            saveMappedCSV()
-                        } label: {
-                            Label("매핑한 CSV를 고객리스트로 저장", systemImage: "square.and.arrow.down")
-                        }
-                    } header: {
-                        Text("컬럼 매핑 확인")
-                    } footer: {
-                        Text("헤더가 없으면 첫 행을 헤더로 사용을 끄고, 열1/열2/열3을 이름·연락처·주소 등에 직접 매핑하세요.")
+                        Label("붙여넣은 CSV 매핑", systemImage: "tablecells")
                     }
                 }
 
@@ -125,27 +116,50 @@ struct ImportView: View {
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }
-                    loadCSVPreview(url: url)
+                    loadCSVFile(url: url)
                 case .failure:
                     state.importMessage = "파일 선택을 완료하지 못했습니다."
                 }
             }
             .sheet(isPresented: $showingCreateList) {
-                CreateListView(companyName: companyName, listName: listName)
+                CreateListView()
                     .environmentObject(state)
             }
             .sheet(isPresented: $showingAddCustomer) {
                 AddCustomerView()
                     .environmentObject(state)
             }
-            .onChange(of: csvFirstRowIsHeader) { _, _ in
-                guard !csvPreviewText.isEmpty else { return }
-                loadCSVPreview(text: csvPreviewText, sourceFileName: csvPreviewSourceFileName)
+            .sheet(item: $importDraft) { draft in
+                ImportMappingSheet(draft: draft)
+                    .environmentObject(state)
             }
+            #if os(iOS)
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task { await recognizePhotoItem(item) }
+            }
+            .sheet(isPresented: $showingCamera) {
+                CameraCaptureView { url in
+                    Task { await recognizeImage(at: url, sourceTitle: "카메라 촬영") }
+                }
+            }
+            #else
+            .fileImporter(
+                isPresented: $showingImageImporter,
+                allowedContentTypes: [.image],
+                allowsMultipleSelection: false
+            ) { result in
+                guard case .success(let urls) = result, let url = urls.first else {
+                    state.ocrMessage = "사진 선택을 완료하지 못했습니다."
+                    return
+                }
+                Task { await recognizeImage(at: url, sourceTitle: "이미지 파일") }
+            }
+            #endif
         }
     }
 
-    private func loadCSVPreview(url: URL) {
+    private func loadCSVFile(url: URL) {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
             if accessGranted {
@@ -161,52 +175,185 @@ struct ImportView: View {
         }
 
         do {
-            let text = try String(contentsOf: url, encoding: .utf8)
-            loadCSVPreview(text: text, sourceFileName: fileName)
+            let text = try decodeCSVText(data: Data(contentsOf: url))
+            presentMappingPopup(text: text, sourceFileName: fileName, sourceTitle: "파일 가져오기")
         } catch {
-            state.importMessage = "파일을 읽지 못했습니다."
+            state.importMessage = "CSV 파일을 읽지 못했습니다. UTF-8, UTF-16, CP949, EUC-KR CSV를 지원합니다."
         }
     }
 
-    private func loadCSVPreview(text: String, sourceFileName: String) {
+    private func presentMappingPopup(text: String, sourceFileName: String, sourceTitle: String) {
+        guard !parseCSVRows(text).isEmpty else {
+            state.importMessage = "읽을 데이터가 없습니다."
+            return
+        }
+        importDraft = ImportDraft(
+            sourceTitle: sourceTitle,
+            sourceFileName: sourceFileName,
+            rawText: text,
+            defaultListName: defaultListName(from: sourceFileName)
+        )
+    }
+
+    private func recognizeImage(at url: URL, sourceTitle: String) async {
+        if let csv = await state.recognizeOCRCSV(url: url, headers: []) {
+            presentMappingPopup(text: csv, sourceFileName: "ocr-image.csv", sourceTitle: sourceTitle)
+        }
+    }
+
+    #if os(iOS)
+    private func recognizePhotoItem(_ item: PhotosPickerItem) async {
         do {
-            csvPreviewText = text
-            csvPreviewSourceFileName = sourceFileName
-            csvPreview = try parseCSV(text, firstRowIsHeader: csvFirstRowIsHeader)
-            state.importMessage = "CSV를 분석했습니다. 컬럼 매핑을 확인하세요."
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                state.ocrMessage = "사진을 읽지 못했습니다."
+                return
+            }
+            let url = try writeTemporaryImage(data: data, extension: "image")
+            await recognizeImage(at: url, sourceTitle: "사진앱")
         } catch {
-            csvPreview = nil
-            state.importMessage = "CSV를 읽지 못했습니다."
+            state.ocrMessage = "사진을 읽지 못했습니다."
+        }
+    }
+
+    private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ocr-\(UUID().uuidString)")
+            .appendingPathExtension(pathExtension)
+        try data.write(to: url, options: [.atomic])
+        return url
+    }
+    #endif
+}
+
+struct ImportDraft: Identifiable {
+    let id = UUID()
+    let sourceTitle: String
+    let sourceFileName: String
+    let rawText: String
+    let defaultListName: String
+}
+
+struct ImportMappingSheet: View {
+    @EnvironmentObject private var state: NativeAppState
+    @Environment(\.dismiss) private var dismiss
+    let draft: ImportDraft
+    @State private var listName: String
+    @State private var firstRowIsHeader = true
+    @State private var parsed: ParsedCSV?
+    @State private var message = ""
+
+    init(draft: ImportDraft) {
+        self.draft = draft
+        self._listName = State(initialValue: draft.defaultListName)
+        self._parsed = State(initialValue: try? parseCSV(draft.rawText, firstRowIsHeader: true))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("고객리스트") {
+                    TextField("고객리스트 이름", text: $listName)
+                    LabeledContent("가져오기 방식", value: draft.sourceTitle)
+                }
+
+                Section {
+                    Toggle("첫 행을 헤더로 사용", isOn: $firstRowIsHeader)
+
+                    if let parsed {
+                        ForEach(FieldKey.allCases, id: \.self) { field in
+                            Picker(fieldLabel(field), selection: mappingSelection(field)) {
+                                Text("사용 안 함").tag(-1)
+                                ForEach(parsed.headers.indices, id: \.self) { index in
+                                    Text("\(index + 1). \(parsed.headers[index])").tag(index)
+                                }
+                            }
+                        }
+                    } else {
+                        Text("데이터를 분석하지 못했습니다.")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("헤더 매핑")
+                } footer: {
+                    Text("헤더 이름이 인식되면 먼저 자동 매핑합니다. 필요하면 여기서 직접 바꾸세요.")
+                }
+
+                if let parsed, let firstRow = parsed.rows.first {
+                    Section("첫 데이터 미리보기") {
+                        ForEach(parsed.headers.indices, id: \.self) { index in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(index + 1). \(parsed.headers[index])")
+                                    .font(.caption.weight(.semibold))
+                                Text(index < firstRow.count ? firstRow[index] : "")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                }
+
+                if !message.isEmpty {
+                    Text(message)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("가져오기 확인")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("저장") {
+                        save()
+                    }
+                    .disabled(parsed == nil || listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onChange(of: firstRowIsHeader) { _, _ in
+                reloadParsed()
+            }
+        }
+    }
+
+    private func reloadParsed() {
+        do {
+            parsed = try parseCSV(draft.rawText, firstRowIsHeader: firstRowIsHeader)
+            message = ""
+        } catch {
+            parsed = nil
+            message = "데이터를 읽지 못했습니다."
         }
     }
 
     private func mappingSelection(_ field: FieldKey) -> Binding<Int> {
         Binding(
             get: {
-                csvPreview?.mapping[field] ?? -1
+                parsed?.mapping[field] ?? -1
             },
             set: { value in
-                guard var next = csvPreview else { return }
+                guard var next = parsed else { return }
                 next.mapping[field] = value < 0 ? nil : value
-                csvPreview = next
+                parsed = next
             }
         )
     }
 
-    private func saveMappedCSV() {
-        guard let parsed = csvPreview else {
-            state.importMessage = "먼저 CSV를 분석하세요."
+    private func save() {
+        guard let parsed else {
+            message = "먼저 데이터를 분석하세요."
             return
         }
         guard parsed.mapping[.name] != nil else {
-            state.importMessage = "고객명으로 사용할 열을 선택하세요."
+            message = "고객명으로 사용할 열을 선택하세요."
             return
         }
         guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil else {
-            state.importMessage = "연락처 또는 주소 열 중 하나는 필요합니다."
+            message = "연락처 또는 주소 열 중 하나는 필요합니다."
             return
         }
-        state.importParsedCSV(parsed, companyName: companyName, listName: listName, sourceFileName: csvPreviewSourceFileName)
+        state.importParsedCSV(parsed, listName: listName, sourceFileName: draft.sourceFileName)
+        dismiss()
     }
 }
 
@@ -240,227 +387,10 @@ private func fieldLabel(_ field: FieldKey) -> String {
     }
 }
 
-struct OCRImportView: View {
-    @EnvironmentObject private var state: NativeAppState
-    #if os(iOS)
-    @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var showingCamera = false
-    #else
-    @State private var showingImageImporter = false
-    #endif
-    @State private var companyName = ""
-    @State private var listName = ""
-    @State private var headers = ""
-    @State private var csvText = ""
-    @State private var csvFirstRowIsHeader = true
-    @State private var csvPreview: ParsedCSV?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("고객사 이름", text: $companyName)
-            TextField("고객리스트 이름", text: $listName)
-            TextField("열 이름 예: 이름,전화번호,주소,메모", text: $headers)
-
-            #if os(iOS)
-            HStack(spacing: 8) {
-                Button {
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        showingCamera = true
-                    } else {
-                        state.ocrMessage = "이 기기에서는 카메라를 사용할 수 없습니다."
-                    }
-                } label: {
-                    Label("카메라로 촬영", systemImage: "camera")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-
-                PhotosPicker(
-                    selection: $selectedPhotoItem,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label("사진앱에서 선택", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-            #else
-            Button {
-                showingImageImporter = true
-            } label: {
-                Label("이미지 파일 선택 후 OCR 실행", systemImage: "photo.on.rectangle")
-            }
-            #endif
-
-            if !csvText.isEmpty {
-                TextEditor(text: $csvText)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(minHeight: 160)
-
-                Button {
-                    loadOCRPreview(text: csvText)
-                } label: {
-                    Label("수정한 OCR CSV 다시 분석", systemImage: "tablecells")
-                }
-            }
-
-            if let parsed = csvPreview {
-                Toggle("첫 행을 헤더로 사용", isOn: $csvFirstRowIsHeader)
-
-                ForEach(FieldKey.allCases, id: \.self) { field in
-                    Picker(fieldLabel(field), selection: ocrMappingSelection(field)) {
-                        Text("사용 안 함").tag(-1)
-                        ForEach(parsed.headers.indices, id: \.self) { index in
-                            Text("\(index + 1). \(parsed.headers[index])").tag(index)
-                        }
-                    }
-                }
-
-                if let firstRow = parsed.rows.first {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("첫 데이터 미리보기")
-                            .font(.caption.weight(.semibold))
-                        ForEach(parsed.headers.indices, id: \.self) { index in
-                            Text("\(index + 1). \(parsed.headers[index]): \(index < firstRow.count ? firstRow[index] : "")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-
-                Button {
-                    saveMappedOCRCSV()
-                } label: {
-                    Label("매핑한 OCR 결과 저장", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            Text(state.ocrMessage)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        #if os(iOS)
-        .onChange(of: selectedPhotoItem) { _, item in
-            guard let item else { return }
-            Task { await recognizePhotoItem(item) }
-        }
-        .onChange(of: csvFirstRowIsHeader) { _, _ in
-            guard !csvText.isEmpty else { return }
-            loadOCRPreview(text: csvText)
-        }
-        .sheet(isPresented: $showingCamera) {
-            CameraCaptureView { url in
-                Task { await recognizeImage(at: url) }
-            }
-        }
-        #else
-        .fileImporter(
-            isPresented: $showingImageImporter,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case .success(let urls) = result, let url = urls.first else {
-                state.ocrMessage = "사진 선택을 완료하지 못했습니다."
-                return
-            }
-            Task {
-                let parsedHeaders = headers
-                    .split(separator: ",")
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                if let csv = await state.recognizeOCRCSV(url: url, headers: parsedHeaders) {
-                    csvText = csv
-                    loadOCRPreview(text: csv)
-                }
-            }
-        }
-        #endif
-    }
-
-    private var parsedHeaders: [String] {
-        headers
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private func recognizeImage(at url: URL) async {
-        if let csv = await state.recognizeOCRCSV(url: url, headers: parsedHeaders) {
-            csvText = csv
-            loadOCRPreview(text: csv)
-        }
-    }
-
-    private func loadOCRPreview(text: String) {
-        do {
-            csvPreview = try parseCSV(text, firstRowIsHeader: csvFirstRowIsHeader)
-            state.ocrMessage = "OCR CSV를 분석했습니다. 컬럼 매핑을 확인하세요."
-        } catch {
-            csvPreview = nil
-            state.ocrMessage = "OCR CSV를 분석하지 못했습니다."
-        }
-    }
-
-    private func ocrMappingSelection(_ field: FieldKey) -> Binding<Int> {
-        Binding(
-            get: {
-                csvPreview?.mapping[field] ?? -1
-            },
-            set: { value in
-                guard var next = csvPreview else { return }
-                next.mapping[field] = value < 0 ? nil : value
-                csvPreview = next
-            }
-        )
-    }
-
-    private func saveMappedOCRCSV() {
-        guard let parsed = csvPreview else {
-            state.ocrMessage = "먼저 OCR CSV를 분석하세요."
-            return
-        }
-        guard parsed.mapping[.name] != nil else {
-            state.ocrMessage = "고객명으로 사용할 열을 선택하세요."
-            return
-        }
-        guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil else {
-            state.ocrMessage = "연락처 또는 주소 열 중 하나는 필요합니다."
-            return
-        }
-        state.importParsedCSV(
-            parsed,
-            companyName: companyName,
-            listName: listName.isEmpty ? "OCR 고객리스트" : listName,
-            sourceFileName: "ocr-image.csv"
-        )
-        state.ocrMessage = state.importMessage
-    }
-
-    #if os(iOS)
-    private func recognizePhotoItem(_ item: PhotosPickerItem) async {
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                state.ocrMessage = "사진을 읽지 못했습니다."
-                return
-            }
-            let url = try writeTemporaryImage(data: data, extension: "image")
-            await recognizeImage(at: url)
-        } catch {
-            state.ocrMessage = "사진을 읽지 못했습니다."
-        }
-    }
-
-    private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ocr-\(UUID().uuidString)")
-            .appendingPathExtension(pathExtension)
-        try data.write(to: url, options: [.atomic])
-        return url
-    }
-    #endif
+private func defaultListName(from sourceFileName: String) -> String {
+    let url = URL(fileURLWithPath: sourceFileName)
+    let baseName = url.deletingPathExtension().lastPathComponent
+    return baseName.isEmpty ? "새 고객리스트" : baseName
 }
 
 #if os(iOS)
@@ -589,18 +519,15 @@ struct AddCustomerView: View {
 struct CreateListView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
-    @State private var companyName: String
     @State private var listName: String
 
-    init(companyName: String = "", listName: String = "") {
-        self._companyName = State(initialValue: companyName)
+    init(listName: String = "") {
         self._listName = State(initialValue: listName)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                TextField("고객사 이름", text: $companyName)
                 TextField("고객리스트 이름", text: $listName)
             }
             .navigationTitle("리스트 생성")
@@ -610,9 +537,10 @@ struct CreateListView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("생성") {
-                        state.createEmptyList(companyName: companyName, listName: listName)
+                        state.createEmptyList(listName: listName)
                         dismiss()
                     }
+                    .disabled(listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
