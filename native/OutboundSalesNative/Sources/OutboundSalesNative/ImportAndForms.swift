@@ -233,14 +233,22 @@ struct ImportDraft: Identifiable {
     let defaultListName: String
 }
 
+private enum ImportDestinationMode: String, CaseIterable {
+    case existingList
+    case newList
+}
+
 struct ImportMappingSheet: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
     let draft: ImportDraft
+    @State private var destinationMode: ImportDestinationMode = .newList
+    @State private var selectedListId = ""
     @State private var listName: String
     @State private var firstRowIsHeader = true
     @State private var parsed: ParsedCSV?
     @State private var message = ""
+    @State private var didPrepareDestination = false
 
     init(draft: ImportDraft) {
         self.draft = draft
@@ -252,7 +260,29 @@ struct ImportMappingSheet: View {
         NavigationStack {
             Form {
                 Section("고객리스트") {
-                    TextField("고객리스트 이름", text: $listName)
+                    Picker("저장 방식", selection: $destinationMode) {
+                        Text("기존 리스트에 추가").tag(ImportDestinationMode.existingList)
+                        Text("새 리스트").tag(ImportDestinationMode.newList)
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(state.customerLists.isEmpty)
+
+                    if destinationMode == .existingList {
+                        if state.customerLists.isEmpty {
+                            Text("아직 기존 고객리스트가 없습니다. 새 리스트로 저장하세요.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("추가할 리스트", selection: $selectedListId) {
+                                ForEach(state.customerLists) { list in
+                                    Text("\(list.name) · \(state.customers.filter { $0.customerListId == list.id }.count)명")
+                                        .tag(list.id)
+                                }
+                            }
+                        }
+                    } else {
+                        TextField("고객리스트 이름", text: $listName)
+                    }
+
                     LabeledContent("가져오기 방식", value: draft.sourceTitle)
                 }
 
@@ -307,12 +337,47 @@ struct ImportMappingSheet: View {
                     Button("저장") {
                         save()
                     }
-                    .disabled(parsed == nil || listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSave)
                 }
+            }
+            .onAppear {
+                prepareDefaultDestination()
             }
             .onChange(of: firstRowIsHeader) { _, _ in
                 reloadParsed()
             }
+            .onChange(of: state.customerLists) { _, _ in
+                ensureSelectedListIsValid()
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        guard parsed != nil else { return false }
+        switch destinationMode {
+        case .existingList:
+            return state.customerLists.contains { $0.id == selectedListId }
+        case .newList:
+            return !listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func prepareDefaultDestination() {
+        guard !didPrepareDestination else { return }
+        didPrepareDestination = true
+        if let preferredListId = state.selectedListId ?? state.customerLists.first?.id {
+            selectedListId = preferredListId
+            destinationMode = .existingList
+        }
+    }
+
+    private func ensureSelectedListIsValid() {
+        if state.customerLists.contains(where: { $0.id == selectedListId }) {
+            return
+        }
+        selectedListId = state.selectedListId ?? state.customerLists.first?.id ?? ""
+        if state.customerLists.isEmpty {
+            destinationMode = .newList
         }
     }
 
@@ -352,7 +417,21 @@ struct ImportMappingSheet: View {
             message = "연락처 또는 주소 열 중 하나는 필요합니다."
             return
         }
-        state.importParsedCSV(parsed, listName: listName, sourceFileName: draft.sourceFileName)
+        switch destinationMode {
+        case .existingList:
+            guard state.customerLists.contains(where: { $0.id == selectedListId }) else {
+                message = "추가할 기존 고객리스트를 선택하세요."
+                return
+            }
+            state.appendParsedCSV(parsed, to: selectedListId, sourceFileName: draft.sourceFileName)
+        case .newList:
+            let trimmedListName = listName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedListName.isEmpty else {
+                message = "고객리스트 이름을 입력하세요."
+                return
+            }
+            state.importParsedCSV(parsed, listName: trimmedListName, sourceFileName: draft.sourceFileName)
+        }
         dismiss()
     }
 }

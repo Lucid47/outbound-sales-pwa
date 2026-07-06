@@ -161,6 +161,24 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    public func appendParsedCSV(_ parsed: ParsedCSV, to listId: String, sourceFileName: String = "import.csv") {
+        guard let listIndex = customerLists.firstIndex(where: { $0.id == listId }) else {
+            importMessage = "추가할 고객리스트를 찾지 못했습니다."
+            return
+        }
+
+        let now = Date()
+        let importedCustomers = customersFromCSV(parsed, customerListId: listId, now: now)
+        customers.append(contentsOf: importedCustomers)
+        customerLists[listIndex].updatedAt = now
+        selectedListId = listId
+        importMessage = "\(customerLists[listIndex].name)에 \(importedCustomers.count)명의 고객을 추가했습니다."
+        persist()
+        Task {
+            await geocodeVisibleCustomers()
+        }
+    }
+
     public func importFile(url: URL, listName: String) {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
