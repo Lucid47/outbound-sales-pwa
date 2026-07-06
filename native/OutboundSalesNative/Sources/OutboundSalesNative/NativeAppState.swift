@@ -375,6 +375,10 @@ public final class NativeAppState: ObservableObject {
         return (latest.1, latest.2, latest.0)
     }
 
+    public func latestTouchDate(for customer: Customer) -> Date? {
+        logs(for: customer).first?.0
+    }
+
     public func progressLabel(for customer: Customer) -> String {
         if customer.status == .done {
             return "완료"

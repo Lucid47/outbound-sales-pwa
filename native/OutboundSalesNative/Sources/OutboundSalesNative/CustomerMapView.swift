@@ -27,7 +27,8 @@ struct CustomerMapView: View {
                             Annotation("", coordinate: coordinate, anchor: .bottom) {
                                 MapCustomerLabel(
                                     customer: customer,
-                                    selected: selectedCustomerId == customer.id
+                                    selected: selectedCustomerId == customer.id,
+                                    lastTouchDate: state.latestTouchDate(for: customer)
                                 )
                                 .onTapGesture {
                                     selectedCustomerId = customer.id
@@ -120,29 +121,46 @@ struct CustomerMapView: View {
 private struct MapCustomerLabel: View {
     let customer: Customer
     let selected: Bool
+    let lastTouchDate: Date?
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(customer.name.isEmpty ? "고객" : customer.name)
-                .font(.caption.weight(.bold))
-                .lineLimit(1)
-            Text(customer.status == .done ? "완료" : "미완")
-                .font(.caption2.weight(.bold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.white.opacity(0.24))
-                .clipShape(Capsule())
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(customer.name.isEmpty ? "고객" : customer.name)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+                Text(customer.status == .done ? "완료" : "미완")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(.white.opacity(0.24))
+                    .clipShape(Capsule())
+            }
+
+            if let lastTouchDate {
+                Text("마지막 \(Self.touchDateFormatter.string(from: lastTouchDate))")
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.white.opacity(0.88))
+            }
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(statusColor)
         .overlay(
-            Capsule().stroke(.white, lineWidth: selected ? 3 : 1.5)
+            RoundedRectangle(cornerRadius: 14).stroke(.white, lineWidth: selected ? 3 : 1.5)
         )
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
     }
+
+    private static let touchDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "MM.dd"
+        return formatter
+    }()
 
     private var statusColor: Color {
         switch customer.status {

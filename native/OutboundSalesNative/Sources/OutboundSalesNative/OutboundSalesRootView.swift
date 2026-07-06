@@ -40,6 +40,10 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    TodayClockHeader()
+                }
+
                 Section("요약") {
                     LabeledContent("선택 리스트", value: state.selectedList?.name ?? "없음")
                     LabeledContent("미완료", value: "\(state.openCustomerCount)")
@@ -74,6 +78,36 @@ struct TodayView: View {
             .navigationTitle("오늘")
         }
     }
+}
+
+private struct TodayClockHeader: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 6) {
+                Text(Self.dateFormatter.string(from: context.date))
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text(Self.timeFormatter.string(from: context.date))
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy년 M월 d일 EEEE"
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 }
 
 enum CustomerFilterMode: String, CaseIterable, Identifiable {

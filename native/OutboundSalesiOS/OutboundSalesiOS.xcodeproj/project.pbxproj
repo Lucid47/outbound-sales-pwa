@@ -9,11 +9,13 @@
 /* Begin PBXBuildFile section */
 		1A0000010000000000000001 /* OutboundSalesiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000020000000000000001 /* OutboundSalesiOSApp.swift */; };
 		1A0000030000000000000001 /* OutboundSalesNative in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000040000000000000001 /* OutboundSalesNative */; };
+		1A0000210000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000220000000000000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		1A0000020000000000000001 /* OutboundSalesiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutboundSalesiOSApp.swift; sourceTree = "<group>"; };
 		1A0000050000000000000001 /* OutboundSalesiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OutboundSalesiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000220000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +42,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000020000000000000001 /* OutboundSalesiOSApp.swift */,
+				1A0000220000000000000001 /* Assets.xcassets */,
 			);
 			path = OutboundSalesiOS;
 			sourceTree = "<group>";
@@ -118,6 +121,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000210000000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,6 +257,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -280,6 +285,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
