@@ -62,8 +62,7 @@ struct ImportView: View {
                                 state.ocrMessage = "이 기기에서는 카메라를 사용할 수 없습니다."
                             }
                         } label: {
-                            Label("카메라", systemImage: "camera")
-                                .frame(maxWidth: .infinity)
+                            ImportSourceButtonLabel(title: "카메라", systemImage: "camera.fill")
                         }
                         .buttonStyle(.borderedProminent)
 
@@ -72,8 +71,7 @@ struct ImportView: View {
                             matching: .images,
                             photoLibrary: .shared()
                         ) {
-                            Label("사진앱", systemImage: "photo.on.rectangle")
-                                .frame(maxWidth: .infinity)
+                            ImportSourceButtonLabel(title: "사진앱", systemImage: "photo.on.rectangle")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -223,6 +221,23 @@ struct ImportView: View {
         return url
     }
     #endif
+}
+
+private struct ImportSourceButtonLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Label(title, systemImage: systemImage)
+                .labelStyle(.titleAndIcon)
+                .font(.body.weight(.semibold))
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 28)
+        .contentShape(Rectangle())
+    }
 }
 
 struct ImportDraft: Identifiable {
