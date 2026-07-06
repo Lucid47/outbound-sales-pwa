@@ -1,5 +1,10 @@
 import OutboundSalesCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 public struct OutboundSalesRootView: View {
     @StateObject private var state = NativeAppState()
@@ -167,7 +172,7 @@ struct CustomersView: View {
                                 .foregroundStyle(AppPalette.textSecondary)
                         }
                         .padding(12)
-                        .background(.white)
+                        .background(AppPalette.cardBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
@@ -178,7 +183,6 @@ struct CustomersView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .colorScheme(.light)
 
                     Picker("표시 방식", selection: $displayMode) {
                         ForEach(CustomerDisplayMode.allCases) { mode in
@@ -186,7 +190,6 @@ struct CustomersView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .colorScheme(.light)
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -226,7 +229,7 @@ struct CustomersView: View {
                         }
                     }
                     .padding(12)
-                    .background(.white)
+                    .background(AppPalette.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .padding(12)
@@ -234,26 +237,41 @@ struct CustomersView: View {
             .background(AppPalette.pageBackground)
             .searchable(text: $state.searchText, prompt: "이름, 전화번호, 주소 검색")
             .navigationTitle("고객")
-            .customerNavigationLightScheme()
         }
     }
 }
 
 enum AppPalette {
-    static let textPrimary = Color(red: 0.086, green: 0.125, blue: 0.196)
-    static let textSecondary = Color(red: 0.43, green: 0.475, blue: 0.57)
-    static let hairline = Color(red: 0.847, green: 0.871, blue: 0.91)
-    static let cardBackground = Color(red: 0.973, green: 0.98, blue: 0.988)
-    static let pageBackground = Color(red: 0.961, green: 0.969, blue: 0.984)
-}
+    static var textPrimary: Color { .primary }
+    static var textSecondary: Color { .secondary }
 
-private extension View {
-    @ViewBuilder
-    func customerNavigationLightScheme() -> some View {
+    static var hairline: Color {
         #if os(iOS)
-        self.toolbarColorScheme(.light, for: .navigationBar)
+        Color(uiColor: .separator)
+        #elseif os(macOS)
+        Color(nsColor: .separatorColor)
         #else
-        self
+        Color.gray.opacity(0.28)
+        #endif
+    }
+
+    static var cardBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .secondarySystemGroupedBackground)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color(.secondary)
+        #endif
+    }
+
+    static var pageBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemGroupedBackground)
+        #elseif os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+        #else
+        Color(.primary)
         #endif
     }
 }
