@@ -68,6 +68,28 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(candidates.contains("대한민국 경기도 하남시 미사강변한강로 30"))
     }
 
+    func testBuildsDenseOCRRowsWithoutMergingAdjacentCustomers() {
+        let boxes = [
+            ocrBox("김소현", x: 0.10, y: 0.10),
+            ocrBox("01012345678", x: 0.34, y: 0.10),
+            ocrBox("서울 송파구", x: 0.58, y: 0.10),
+            ocrBox("김태영", x: 0.10, y: 0.12),
+            ocrBox("01023456789", x: 0.34, y: 0.12),
+            ocrBox("서울 성동구", x: 0.58, y: 0.12),
+            ocrBox("신나리", x: 0.10, y: 0.14),
+            ocrBox("01034567890", x: 0.34, y: 0.14),
+            ocrBox("경기 하남시", x: 0.58, y: 0.14)
+        ]
+
+        let table = buildOCRTable(from: boxes)
+
+        XCTAssertEqual(table.rows.count, 3)
+        XCTAssertEqual(table.columnCount, 3)
+        XCTAssertEqual(table.rows[0][0].text, "김소현")
+        XCTAssertEqual(table.rows[1][0].text, "김태영")
+        XCTAssertEqual(table.rows[2][0].text, "신나리")
+    }
+
     func testSavesAndLoadsNativeSnapshot() throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -104,5 +126,17 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(try store.load(), snapshot)
         try store.delete()
         XCTAssertNil(try store.load())
+    }
+
+    private func ocrBox(_ text: String, x: Double, y: Double) -> RecognizedTextBox {
+        RecognizedTextBox(
+            text: text,
+            x: x,
+            y: y,
+            width: 0.08,
+            height: 0.010,
+            confidence: 0.95,
+            sourceLevel: "test"
+        )
     }
 }

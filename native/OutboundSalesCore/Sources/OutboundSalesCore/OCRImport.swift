@@ -63,19 +63,101 @@ public func recognizeCustomerListImage(
     rowThreshold: Double? = nil,
     rotateDegrees: Int = 0
 ) throws -> OCRImportResult {
-    let image = rotateImage(try loadCGImage(from: url), degrees: rotateDegrees)
+    let image = try loadCGImage(from: url)
+    if rowThreshold != nil || rotateDegrees != 0 {
+        return try recognizeCustomerListImage(
+            in: rotateImage(image, degrees: rotateDegrees),
+            headers: headers,
+            headerMode: headerMode,
+            languages: languages,
+            minConfidence: minConfidence,
+            rowThreshold: rowThreshold
+        )
+    }
+    return try recognizeBestCustomerListImage(
+        in: image,
+        headers: headers,
+        headerMode: headerMode,
+        languages: languages,
+        minConfidence: minConfidence
+    )
+}
+
+private func loadCGImage(from url: URL) throws -> CGImage {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+        throw OCRImportError.imageLoadFailed
+    }
+    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    let width = properties?[kCGImagePropertyPixelWidth] as? Int ?? 0
+    let height = properties?[kCGImagePropertyPixelHeight] as? Int ?? 0
+    let maxPixelSize = max(width, height)
+    let transformOptions: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+    ]
+    if maxPixelSize > 0,
+       let orientedImage = CGImageSourceCreateThumbnailAtIndex(source, 0, transformOptions as CFDictionary) {
+        return orientedImage
+    }
+    guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        throw OCRImportError.imageLoadFailed
+    }
+    return image
+}
+
+private func recognizeBestCustomerListImage(
+    in image: CGImage,
+    headers: [String],
+    headerMode: OCRHeaderMode,
+    languages: [String],
+    minConfidence: Float
+) throws -> OCRImportResult {
+    let rotations = [0, 90, 270, 180]
+    let rowThresholds: [Double?] = [nil, 0.010, 0.014, 0.018]
+    var best: (result: OCRImportResult, score: Double)?
+
+    for rotation in rotations {
+        let rotatedImage = rotateImage(image, degrees: rotation)
+        let boxes = try recognizeText(in: rotatedImage, languages: languages, minConfidence: minConfidence)
+        for rowThreshold in rowThresholds {
+            let table = buildOCRTable(from: boxes, rowThresholdOverride: rowThreshold)
+            let csv = makeOCRCSV(from: table, headers: headers, headerMode: headerMode)
+            let result = OCRImportResult(boxes: boxes, table: table, csv: csv)
+            let score = scoreOCRTable(table)
+                - (rotation == 0 ? 0 : 1.5)
+                - (rowThreshold == nil ? 0 : 0.2)
+            if best == nil || score > best!.score {
+                best = (result, score)
+            }
+        }
+    }
+
+    guard let best else {
+        return try recognizeCustomerListImage(
+            in: image,
+            headers: headers,
+            headerMode: headerMode,
+            languages: languages,
+            minConfidence: minConfidence,
+            rowThreshold: nil
+        )
+    }
+    return best.result
+}
+
+private func recognizeCustomerListImage(
+    in image: CGImage,
+    headers: [String],
+    headerMode: OCRHeaderMode,
+    languages: [String],
+    minConfidence: Float,
+    rowThreshold: Double?
+) throws -> OCRImportResult {
     let boxes = try recognizeText(in: image, languages: languages, minConfidence: minConfidence)
     let table = buildOCRTable(from: boxes, rowThresholdOverride: rowThreshold)
     let csv = makeOCRCSV(from: table, headers: headers, headerMode: headerMode)
     return OCRImportResult(boxes: boxes, table: table, csv: csv)
-}
-
-private func loadCGImage(from url: URL) throws -> CGImage {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-        throw OCRImportError.imageLoadFailed
-    }
-    return image
 }
 
 private func rotateImage(_ image: CGImage, degrees: Int) -> CGImage {
@@ -160,7 +242,7 @@ public func buildOCRTable(from boxes: [RecognizedTextBox], rowThresholdOverride:
     }
 
     let medianHeight = median(boxes.map(\.height))
-    let rowThreshold = rowThresholdOverride ?? max(medianHeight * 1.7, 0.035)
+    let rowThreshold = rowThresholdOverride ?? defaultRowThreshold(forMedianHeight: medianHeight)
     let columnThreshold = max(median(boxes.map(\.width)) * 0.8, 0.045)
     let rowGroups = cluster(boxes.sorted { $0.centerY < $1.centerY }, key: \.centerY, threshold: rowThreshold)
         .map { $0.sorted { $0.x < $1.x } }
@@ -195,6 +277,41 @@ public func buildOCRTable(from boxes: [RecognizedTextBox], rowThresholdOverride:
     }
 
     return OcrTable(rows: tableRows, columnCount: columnCenters.count, warnings: warnings)
+}
+
+private func defaultRowThreshold(forMedianHeight medianHeight: Double) -> Double {
+    min(max(medianHeight * 0.9, 0.008), 0.018)
+}
+
+private func scoreOCRTable(_ table: OcrTable) -> Double {
+    guard table.columnCount > 0, !table.rows.isEmpty else { return -100 }
+    let cells = table.rows.flatMap { $0 }
+    let nonemptyCells = cells.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    let nonemptyRows = table.rows.filter { row in
+        row.contains { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+    guard !nonemptyRows.isEmpty else { return -100 }
+
+    let filledRatio = Double(nonemptyCells.count) / Double(max(cells.count, 1))
+    let averageFilledCellsPerRow = Double(nonemptyCells.count) / Double(nonemptyRows.count)
+    let longCellRatio = Double(nonemptyCells.filter { $0.text.count >= 34 }.count) / Double(max(nonemptyCells.count, 1))
+    let veryLongCellRatio = Double(nonemptyCells.filter { $0.text.count >= 60 }.count) / Double(max(nonemptyCells.count, 1))
+    let columnScore: Double
+    if (2...8).contains(table.columnCount) {
+        columnScore = 28
+    } else if table.columnCount == 1 {
+        columnScore = -35
+    } else {
+        columnScore = 6
+    }
+
+    return Double(min(nonemptyRows.count, 80)) * 2.4
+        + columnScore
+        + filledRatio * 24
+        + min(averageFilledCellsPerRow, 5) * 7
+        - longCellRatio * 70
+        - veryLongCellRatio * 120
+        - Double(table.warnings.count) * 0.25
 }
 
 public func makeOCRCSV(from table: OcrTable, headers providedHeaders: [String], headerMode: OCRHeaderMode) -> OCRCSVBuildResult {
