@@ -9,8 +9,25 @@ public final class NativeAppState: ObservableObject {
     @Published public var searchText = ""
     @Published public var importMessage = ""
     @Published public var ocrMessage = "문서 스캔 OCR은 다음 단계에서 VisionKit으로 연결합니다."
+    @Published public private(set) var storageMessage = ""
 
-    public init(seedSamples: Bool = true) {
+    private let fileStore: NativeAppFileStore
+
+    public init(seedSamples: Bool = false, fileStore: NativeAppFileStore = NativeAppFileStore()) {
+        self.fileStore = fileStore
+
+        do {
+            if let snapshot = try fileStore.load() {
+                self.customerLists = snapshot.customerLists
+                self.customers = snapshot.customers
+                self.selectedListId = snapshot.selectedListId
+                self.storageMessage = "저장된 데이터를 불러왔습니다."
+                return
+            }
+        } catch {
+            self.storageMessage = "저장된 데이터를 읽지 못했습니다."
+        }
+
         if seedSamples {
             let seed = Self.sampleData()
             self.customerLists = seed.lists
@@ -47,6 +64,7 @@ public final class NativeAppState: ObservableObject {
 
     public func selectList(_ list: CustomerList) {
         selectedListId = list.id
+        persist()
     }
 
     public func createEmptyList(companyName: String, listName: String) {
@@ -62,6 +80,7 @@ public final class NativeAppState: ObservableObject {
         )
         customerLists.insert(list, at: 0)
         selectedListId = list.id
+        persist()
     }
 
     public func importCSV(text: String, companyName: String, listName: String, sourceFileName: String = "import.csv") {
@@ -82,6 +101,7 @@ public final class NativeAppState: ObservableObject {
             customers.append(contentsOf: importedCustomers)
             selectedListId = list.id
             importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
+            persist()
         } catch {
             importMessage = "CSV를 읽지 못했습니다."
         }
@@ -105,12 +125,48 @@ public final class NativeAppState: ObservableObject {
             ),
             at: 0
         )
+        persist()
     }
 
     public func toggleDone(_ customer: Customer) {
         guard let index = customers.firstIndex(where: { $0.id == customer.id }) else { return }
         customers[index].status = customers[index].status == .done ? .open : .done
         customers[index].updatedAt = Date()
+        persist()
+    }
+
+    public func resetLocalData(seedSamples: Bool = false) {
+        if seedSamples {
+            let seed = Self.sampleData()
+            customerLists = seed.lists
+            customers = seed.customers
+            selectedListId = seed.lists.first?.id
+        } else {
+            customerLists = []
+            customers = []
+            selectedListId = nil
+        }
+        do {
+            try fileStore.delete()
+            storageMessage = "로컬 데이터를 초기화했습니다."
+        } catch {
+            storageMessage = "로컬 데이터 초기화에 실패했습니다."
+        }
+    }
+
+    private func persist() {
+        let snapshot = NativeAppSnapshot(
+            customerLists: customerLists,
+            customers: customers,
+            selectedListId: selectedListId
+        )
+
+        do {
+            try fileStore.save(snapshot)
+            storageMessage = "로컬에 저장했습니다."
+        } catch {
+            storageMessage = "로컬 저장에 실패했습니다."
+        }
     }
 
     static func sampleData() -> (lists: [CustomerList], customers: [Customer]) {
@@ -153,4 +209,3 @@ public final class NativeAppState: ObservableObject {
         return ([list], customers)
     }
 }
-

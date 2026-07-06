@@ -32,6 +32,9 @@ native/
 - OCR 진입 화면 초안
 - iPhone/iPad용 Xcode 앱 프로젝트 초안
 - 앱 시작 화면과 SwiftUI 루트 화면 연결
+- 고객리스트/고객 데이터를 앱 전용 JSON 파일로 로컬 저장
+- 앱 재실행 시 저장된 데이터 자동 복원
+- 설정 화면에서 로컬 저장 상태 표시와 초기화 지원
 
 ## 빌드
 
@@ -72,3 +75,14 @@ open native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj
 ```
 
 Xcode에서 `OutboundSalesiOS` scheme을 선택하면 됩니다. 현재 iOS 시뮬레이터 런타임은 설치되어 있지 않으므로 화면 실행 검증은 실제 기기 연결 또는 시뮬레이터 추가 설치 후 진행합니다.
+
+## 로컬 데이터
+
+네이티브 앱의 1차 로컬 저장은 앱 샌드박스의 Application Support 영역에 `native-data.json` 파일로 저장합니다. 고객정보 파일은 Git에 포함하지 않으며, 이후 실제 기기 테스트가 완료되면 iOS 백업/복원, Google Drive 동기화, 삭제 동기화 정책을 별도로 연결합니다.
+
+## 다음 단계
+
+- 실제 iPhone/iPad 연결 후 Xcode에서 앱 실행 확인
+- CSV 텍스트 붙여넣기 방식에서 파일 선택 import 방식으로 확장
+- 고객 상세 화면, 전화/문자/길찾기 액션 포팅
+- OCR 입력 화면에 사진/문서 선택 연결

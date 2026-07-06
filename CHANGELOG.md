@@ -9,6 +9,11 @@
   - 고객/오늘/가져오기/OCR/기록/설정 탭을 가진 `OutboundSalesNative` SwiftUI 화면 모듈 추가
   - 실제 iPhone/iPad 앱으로 빌드할 수 있는 `OutboundSalesiOS` Xcode 프로젝트 추가
   - macOS Swift 빌드와 generic iOS 기기 대상 빌드 통과 확인
+- 네이티브 앱 로컬 저장소 1차 구현
+  - 고객리스트/고객 데이터를 앱 전용 JSON 파일로 저장
+  - 앱 시작 시 저장된 데이터 자동 복원
+  - 설정 화면에 저장 상태와 로컬 데이터 초기화 기능 추가
+  - 저장/복원 단위 테스트 추가
 - CSV 없이 빈 고객리스트를 직접 만들고 해당 리스트에 고객을 수동 추가할 수 있도록 개선
 - 고객리스트 OCR Swift CLI 기본 틀 추가
   - 이미지 입력, Apple Vision OCR, 좌표 JSON, 표 복원 JSON, CSV 출력 흐름 구현

@@ -56,7 +56,8 @@
   - 네이티브 연락처/문자/지도 연동
   - 개발환경 가이드: `docs/native-app-setup.md`
   - 현재 초안: `native/OutboundSalesCore`, `native/OutboundSalesNative`, `native/OutboundSalesiOS`
-  - 다음 단계: 실제 기기 연결 후 화면 실행 확인, 로컬 저장소 연결, PWA 상세 기능 순차 포팅
+  - 완료: 기본 SwiftUI 탭 구조, CSV 텍스트 import, 고객리스트/고객 로컬 JSON 저장
+  - 다음 단계: 실제 기기 연결 후 화면 실행 확인, CSV 파일 선택 import, 고객 상세/전화/문자/길찾기 액션 포팅
 - OCR 기반 고객리스트 인식
   - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
   - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원

@@ -49,5 +49,42 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(normalizeAddressForMapSearch("서울 강남구 테헤란로 152 3층"), "서울 강남구 테헤란로 152")
         XCTAssertTrue(isSearchableAddress("서울 강남구 테헤란로 152"))
     }
-}
 
+    func testSavesAndLoadsNativeSnapshot() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("native-data.json")
+        let store = NativeAppFileStore(fileURL: fileURL)
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let list = CustomerList(
+            id: "list-1",
+            name: "테스트 리스트",
+            companyName: "테스트 고객사",
+            sourceFileName: "sample.csv",
+            importedAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+        let customer = Customer(
+            id: "customer-1",
+            customerListId: list.id,
+            name: "홍길동",
+            phoneNumber: "010-1234-5678",
+            address: "서울 강남구 테헤란로 152",
+            notes: "메모",
+            createdAt: now,
+            updatedAt: now
+        )
+        let snapshot = NativeAppSnapshot(
+            customerLists: [list],
+            customers: [customer],
+            selectedListId: list.id,
+            savedAt: now
+        )
+
+        try store.save(snapshot)
+        XCTAssertEqual(try store.load(), snapshot)
+        try store.delete()
+        XCTAssertNil(try store.load())
+    }
+}

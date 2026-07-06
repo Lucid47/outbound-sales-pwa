@@ -141,16 +141,33 @@ struct LogsView: View {
 }
 
 struct SettingsView: View {
+    @EnvironmentObject private var state: NativeAppState
+    @State private var showingResetConfirmation = false
+
     var body: some View {
         NavigationStack {
             List {
+                Section("로컬 저장") {
+                    LabeledContent("상태", value: state.storageMessage.isEmpty ? "대기 중" : state.storageMessage)
+                    Button(role: .destructive) {
+                        showingResetConfirmation = true
+                    } label: {
+                        Label("로컬 데이터 초기화", systemImage: "trash")
+                    }
+                }
+
                 Section("네이티브 앱") {
-                    Label("로컬 저장소와 백업은 다음 단계에서 연결합니다.", systemImage: "externaldrive")
+                    Label("고객리스트와 고객 정보는 기기 안에 저장합니다.", systemImage: "externaldrive")
                     Label("Google Drive 동기화는 PWA 구현을 기준으로 별도 포팅합니다.", systemImage: "icloud")
                 }
             }
             .navigationTitle("설정")
+            .confirmationDialog("로컬 데이터를 초기화할까요?", isPresented: $showingResetConfirmation) {
+                Button("초기화", role: .destructive) {
+                    state.resetLocalData()
+                }
+                Button("취소", role: .cancel) {}
+            }
         }
     }
 }
-
