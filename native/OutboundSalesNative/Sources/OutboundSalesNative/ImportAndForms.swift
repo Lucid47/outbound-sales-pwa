@@ -644,6 +644,7 @@ struct CreateListView: View {
 struct LogsView: View {
     @EnvironmentObject private var state: NativeAppState
     @State private var selectedHistoryCustomer: Customer?
+    @State private var isDateFilterEnabled = false
     @State private var startDate = Calendar.current.date(
         byAdding: .day,
         value: -30,
@@ -652,9 +653,9 @@ struct LogsView: View {
     @State private var endDate = Date()
 
     private var historyPreviews: [CustomerHistoryPreview] {
-        guard let dateRange else { return [] }
+        guard !isDateFilterEnabled || dateRange != nil else { return [] }
         return state.visibleCustomers.compactMap { customer in
-            let logs = state.logs(for: customer).filter { dateRange.contains($0.0) }
+            let logs = filteredLogs(for: customer)
             guard let latest = logs.first else { return nil }
             return CustomerHistoryPreview(customer: customer, latest: latest, count: logs.count)
         }
@@ -673,6 +674,17 @@ struct LogsView: View {
         historyPreviews.reduce(0) { $0 + $1.count }
     }
 
+    private var historySectionTitle: String {
+        isDateFilterEnabled ? "기간 내 고객별 히스토리" : "전체 고객별 히스토리"
+    }
+
+    private func filteredLogs(for customer: Customer) -> [(Date, String, String)] {
+        let logs = state.logs(for: customer)
+        guard isDateFilterEnabled else { return logs }
+        guard let dateRange else { return [] }
+        return logs.filter { dateRange.contains($0.0) }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -685,26 +697,33 @@ struct LogsView: View {
                 }
 
                 Section("조회 기간") {
-                    DatePicker("시작날짜", selection: $startDate, displayedComponents: .date)
-                    DatePicker("종료날짜", selection: $endDate, displayedComponents: .date)
-                    if dateRange == nil {
-                        Text("시작날짜가 종료날짜보다 늦습니다.")
-                            .foregroundStyle(.red)
+                    Toggle("조회 기간 사용", isOn: $isDateFilterEnabled)
+                    if isDateFilterEnabled {
+                        DatePicker("시작날짜", selection: $startDate, displayedComponents: .date)
+                        DatePicker("종료날짜", selection: $endDate, displayedComponents: .date)
+                        if dateRange == nil {
+                            Text("시작날짜가 종료날짜보다 늦습니다.")
+                                .foregroundStyle(.red)
+                        } else {
+                            LabeledContent("기간 내 고객", value: "\(historyPreviews.count)명")
+                            LabeledContent("기간 내 이력", value: "\(periodLogCount)건")
+                        }
                     } else {
-                        LabeledContent("기간 내 고객", value: "\(historyPreviews.count)명")
-                        LabeledContent("기간 내 이력", value: "\(periodLogCount)건")
+                        Text("꺼져 있으면 전체 고객 이력을 보여줍니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("기간 내 고객별 히스토리") {
+                Section(historySectionTitle) {
                     if state.visibleCustomers.isEmpty {
                         Text("기록 없음")
                             .foregroundStyle(.secondary)
-                    } else if dateRange == nil {
+                    } else if isDateFilterEnabled && dateRange == nil {
                         Text("조회 기간을 다시 선택하세요.")
                             .foregroundStyle(.secondary)
                     } else if historyPreviews.isEmpty {
-                        Text("선택한 기간에 터치 이력이 없습니다.")
+                        Text(isDateFilterEnabled ? "선택한 기간에 터치 이력이 없습니다." : "아직 터치 이력이 없습니다.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(historyPreviews) { preview in
