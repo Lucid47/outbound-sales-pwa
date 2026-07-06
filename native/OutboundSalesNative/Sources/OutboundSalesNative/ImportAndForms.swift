@@ -653,8 +653,10 @@ struct LogsView: View {
                                 HStack(alignment: .center, spacing: 10) {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(customer.name.isEmpty ? "이름 없음" : customer.name)
-                                            .font(.headline)
+                                            .font(.title3.weight(.heavy))
                                             .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.82)
                                         Text("\(customer.region ?? extractRegion(customer.address)) · \(customer.phoneNumber.isEmpty ? "연락처 없음" : customer.phoneNumber)")
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)

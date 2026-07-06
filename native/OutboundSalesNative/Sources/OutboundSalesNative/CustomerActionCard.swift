@@ -18,7 +18,9 @@ struct CustomerActionCard: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(customer.name.isEmpty ? "이름 없음" : customer.name)
-                        .font(.headline)
+                        .font(compact ? .title3.weight(.heavy) : .title2.weight(.heavy))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
                     Text(regionLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -221,29 +223,34 @@ struct CustomerCompactRow: View {
             CustomerDetailView(customerId: customer.id)
                 .environmentObject(state)
         } label: {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 statusDot
+                    .padding(.top, 8)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Text(customer.name.isEmpty ? "이름 없음" : customer.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
+                    Text(customer.name.isEmpty ? "이름 없음" : customer.name)
+                        .font(.title3.weight(.heavy))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    HStack(spacing: 6) {
                         if !customer.phoneNumber.isEmpty {
                             Text(customer.phoneNumber)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .font(.subheadline.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(.primary)
                                 .lineLimit(1)
                         }
+                        Text(state.progressLabel(for: customer))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(statusColor)
+                            .lineLimit(1)
                     }
+
                     Text(compactAddressLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(state.progressLabel(for: customer))
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(statusColor)
             }
             .contentShape(Rectangle())
         }
