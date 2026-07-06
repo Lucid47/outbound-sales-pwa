@@ -16,6 +16,7 @@
 5. 네이티브 앱으로 전환하는 경우 iPhone/iPad 우선 개발 후 Android 확장을 검토한다.
    - iPhone/iPad: VisionKit, Apple Vision
    - Android: ML Kit Document Scanner, ML Kit Text Recognition v2
+6. 네이티브 앱 개발환경과 초기 프로젝트 준비는 `docs/native-app-setup.md`를 기준으로 진행한다.
 
 ## 가까운 개선
 
@@ -53,6 +54,7 @@
   - Swift/SwiftUI
   - Vision 프레임워크 OCR
   - 네이티브 연락처/문자/지도 연동
+  - 개발환경 가이드: `docs/native-app-setup.md`
 - OCR 기반 고객리스트 인식
   - 스캔 이미지 파일 입력으로 Mac 코어 기능 먼저 검증
   - OCR 결과의 텍스트와 좌표를 이용해 행/열 복원
