@@ -88,7 +88,7 @@ native/
   - CSV 분석 후 저장 전 컬럼 매핑 확인
 - Apple Vision 기반 사진 OCR import
   - Swift CLI에서 검증한 OCR 표 복원 코어 로직을 `OutboundSalesCore`로 이동
-  - iPhone/iPad에서 카메라 촬영 또는 사진앱 선택, 표 OCR, CSV 미리보기/수정, 고객리스트 저장 흐름 연결
+  - iPhone/iPad에서 카메라 촬영 또는 사진앱 선택, 표 OCR, CSV 미리보기/수정, 컬럼 매핑 확인, 고객리스트 저장 흐름 연결
 - 문자 템플릿 선택 시트
   - 고객 카드, 고객 상세, 지도 팝업의 문자 버튼은 먼저 일반 문자/템플릿 문자 선택 화면을 표시
   - 템플릿 문자는 iOS 문자 작성창에 수신번호와 본문을 자동 입력

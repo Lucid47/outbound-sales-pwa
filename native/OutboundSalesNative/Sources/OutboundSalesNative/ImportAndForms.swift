@@ -252,6 +252,8 @@ struct OCRImportView: View {
     @State private var listName = ""
     @State private var headers = ""
     @State private var csvText = ""
+    @State private var csvFirstRowIsHeader = true
+    @State private var csvPreview: ParsedCSV?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -297,10 +299,43 @@ struct OCRImportView: View {
                     .frame(minHeight: 160)
 
                 Button {
-                    state.importCSV(text: csvText, companyName: companyName, listName: listName.isEmpty ? "OCR 고객리스트" : listName, sourceFileName: "ocr-image.csv")
+                    loadOCRPreview(text: csvText)
                 } label: {
-                    Label("OCR CSV를 고객리스트로 저장", systemImage: "square.and.arrow.down")
+                    Label("수정한 OCR CSV 다시 분석", systemImage: "tablecells")
                 }
+            }
+
+            if let parsed = csvPreview {
+                Toggle("첫 행을 헤더로 사용", isOn: $csvFirstRowIsHeader)
+
+                ForEach(FieldKey.allCases, id: \.self) { field in
+                    Picker(fieldLabel(field), selection: ocrMappingSelection(field)) {
+                        Text("사용 안 함").tag(-1)
+                        ForEach(parsed.headers.indices, id: \.self) { index in
+                            Text("\(index + 1). \(parsed.headers[index])").tag(index)
+                        }
+                    }
+                }
+
+                if let firstRow = parsed.rows.first {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("첫 데이터 미리보기")
+                            .font(.caption.weight(.semibold))
+                        ForEach(parsed.headers.indices, id: \.self) { index in
+                            Text("\(index + 1). \(parsed.headers[index]): \(index < firstRow.count ? firstRow[index] : "")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                Button {
+                    saveMappedOCRCSV()
+                } label: {
+                    Label("매핑한 OCR 결과 저장", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
             }
 
             Text(state.ocrMessage)
@@ -311,6 +346,10 @@ struct OCRImportView: View {
         .onChange(of: selectedPhotoItem) { _, item in
             guard let item else { return }
             Task { await recognizePhotoItem(item) }
+        }
+        .onChange(of: csvFirstRowIsHeader) { _, _ in
+            guard !csvText.isEmpty else { return }
+            loadOCRPreview(text: csvText)
         }
         .sheet(isPresented: $showingCamera) {
             CameraCaptureView { url in
@@ -334,6 +373,7 @@ struct OCRImportView: View {
                     .filter { !$0.isEmpty }
                 if let csv = await state.recognizeOCRCSV(url: url, headers: parsedHeaders) {
                     csvText = csv
+                    loadOCRPreview(text: csv)
                 }
             }
         }
@@ -350,7 +390,53 @@ struct OCRImportView: View {
     private func recognizeImage(at url: URL) async {
         if let csv = await state.recognizeOCRCSV(url: url, headers: parsedHeaders) {
             csvText = csv
+            loadOCRPreview(text: csv)
         }
+    }
+
+    private func loadOCRPreview(text: String) {
+        do {
+            csvPreview = try parseCSV(text, firstRowIsHeader: csvFirstRowIsHeader)
+            state.ocrMessage = "OCR CSV를 분석했습니다. 컬럼 매핑을 확인하세요."
+        } catch {
+            csvPreview = nil
+            state.ocrMessage = "OCR CSV를 분석하지 못했습니다."
+        }
+    }
+
+    private func ocrMappingSelection(_ field: FieldKey) -> Binding<Int> {
+        Binding(
+            get: {
+                csvPreview?.mapping[field] ?? -1
+            },
+            set: { value in
+                guard var next = csvPreview else { return }
+                next.mapping[field] = value < 0 ? nil : value
+                csvPreview = next
+            }
+        )
+    }
+
+    private func saveMappedOCRCSV() {
+        guard let parsed = csvPreview else {
+            state.ocrMessage = "먼저 OCR CSV를 분석하세요."
+            return
+        }
+        guard parsed.mapping[.name] != nil else {
+            state.ocrMessage = "고객명으로 사용할 열을 선택하세요."
+            return
+        }
+        guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil else {
+            state.ocrMessage = "연락처 또는 주소 열 중 하나는 필요합니다."
+            return
+        }
+        state.importParsedCSV(
+            parsed,
+            companyName: companyName,
+            listName: listName.isEmpty ? "OCR 고객리스트" : listName,
+            sourceFileName: "ocr-image.csv"
+        )
+        state.ocrMessage = state.importMessage
     }
 
     #if os(iOS)
