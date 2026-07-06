@@ -162,17 +162,29 @@ struct CustomerDetailView: View {
     }
 
     private func openDirections(_ customer: Customer) {
+        let goalName = (customer.name.isEmpty ? customer.address : customer.name)
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         if let latitude = customer.latitude, let longitude = customer.longitude {
-            let item = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)))
-            item.name = customer.name
-            item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+            if let tmapURL = URL(string: "tmap://route?goalx=\(longitude)&goaly=\(latitude)&goalname=\(goalName)") {
+                openURL(tmapURL) { accepted in
+                    if !accepted {
+                        let item = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)))
+                        item.name = customer.name
+                        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+                    }
+                }
+            }
             return
         }
 
-        let query = normalizeAddressForMapSearch(customer.address)
+        let query = normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address)
         if let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-           let url = URL(string: "http://maps.apple.com/?daddr=\(encoded)") {
-            openURL(url)
+           let tmapURL = URL(string: "tmap://?search=\(encoded)") {
+            openURL(tmapURL) { accepted in
+                if !accepted, let appleURL = URL(string: "http://maps.apple.com/?daddr=\(encoded)") {
+                    openURL(appleURL)
+                }
+            }
         }
     }
 

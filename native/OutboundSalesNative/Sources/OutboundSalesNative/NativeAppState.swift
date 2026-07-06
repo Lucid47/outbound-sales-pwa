@@ -21,6 +21,7 @@ public final class NativeAppState: ObservableObject {
 
     private let fileStore: NativeAppFileStore
     private let geocoder = CLGeocoder()
+    private var didRunStartupMaintenance = false
 
     public init(seedSamples: Bool = false, fileStore: NativeAppFileStore = NativeAppFileStore()) {
         self.fileStore = fileStore
@@ -100,6 +101,12 @@ public final class NativeAppState: ObservableObject {
         return ids.compactMap { id in customers.first { $0.id == id } }
     }
 
+    public func performStartupMaintenance() async {
+        guard !didRunStartupMaintenance else { return }
+        didRunStartupMaintenance = true
+        await geocodeVisibleCustomers()
+    }
+
     public func selectList(_ list: CustomerList) {
         selectedListId = list.id
         persist()
@@ -140,6 +147,9 @@ public final class NativeAppState: ObservableObject {
             selectedListId = list.id
             importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
             persist()
+            Task {
+                await geocodeVisibleCustomers()
+            }
         } catch {
             importMessage = "CSV를 읽지 못했습니다."
         }
@@ -194,6 +204,10 @@ public final class NativeAppState: ObservableObject {
         )
         selectedListId = listId
         persist()
+        let customerId = customers.first?.id
+        Task {
+            await geocodeCustomerIfNeeded(id: customerId)
+        }
     }
 
     public func updateCustomer(_ customer: Customer, name: String, phoneNumber: String, address: String, birthDate: String, notes: String) {
@@ -204,8 +218,18 @@ public final class NativeAppState: ObservableObject {
         customers[index].birthDate = birthDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : birthDate
         customers[index].notes = notes
         customers[index].region = extractRegion(address)
+        if customer.address != address {
+            customers[index].latitude = nil
+            customers[index].longitude = nil
+            customers[index].coordinateSource = nil
+            customers[index].geocodedAt = nil
+            customers[index].geocodeQuery = nil
+        }
         customers[index].updatedAt = Date()
         persist()
+        Task {
+            await geocodeCustomerIfNeeded(id: customer.id)
+        }
     }
 
     public func toggleDone(_ customer: Customer) {
@@ -362,25 +386,32 @@ public final class NativeAppState: ObservableObject {
         var successCount = 0
         for customer in targets {
             guard let index = customers.firstIndex(where: { $0.id == customer.id }) else { continue }
-            do {
-                let query = normalizeAddressForMapSearch(customer.address)
-                let placemarks = try await geocoder.geocodeAddressString(query)
-                if let location = placemarks.first?.location {
-                    customers[index].latitude = location.coordinate.latitude
-                    customers[index].longitude = location.coordinate.longitude
-                    customers[index].coordinateSource = .geocoded
-                    customers[index].geocodedAt = Date()
-                    customers[index].geocodeQuery = query
-                    customers[index].updatedAt = Date()
-                    successCount += 1
-                }
-            } catch {
+            if await geocodeCustomer(at: index) {
+                successCount += 1
+            } else {
                 customers[index].status = .needsGeocode
                 customers[index].updatedAt = Date()
             }
             try? await Task.sleep(for: .milliseconds(400))
         }
         geocodeMessage = "\(successCount)/\(targets.count)개 주소를 변환했습니다."
+        persist()
+    }
+
+    public func geocodeCustomerIfNeeded(id: String?) async {
+        guard let id, let index = customers.firstIndex(where: { $0.id == id }) else { return }
+        guard customers[index].latitude == nil || customers[index].longitude == nil else { return }
+        guard isSearchableAddress(customers[index].address) else {
+            geocodeMessage = "도로명주소를 인식하지 못했습니다."
+            return
+        }
+        if await geocodeCustomer(at: index) {
+            geocodeMessage = "주소를 지도 좌표로 변환했습니다."
+        } else {
+            customers[index].status = .needsGeocode
+            customers[index].updatedAt = Date()
+            geocodeMessage = "주소 좌표 변환에 실패했습니다."
+        }
         persist()
     }
 
@@ -456,6 +487,33 @@ public final class NativeAppState: ObservableObject {
         case .cancelled: return "취소"
         case .unknown: return "상태 미확인"
         }
+    }
+
+    private func geocodeCustomer(at index: Int) async -> Bool {
+        for query in geocodeQueries(for: customers[index].address) {
+            do {
+                let placemarks = try await geocoder.geocodeAddressString(query)
+                if let location = placemarks.first?.location {
+                    customers[index].latitude = location.coordinate.latitude
+                    customers[index].longitude = location.coordinate.longitude
+                    customers[index].coordinateSource = .geocoded
+                    customers[index].geocodedAt = Date()
+                    customers[index].geocodeQuery = query
+                    customers[index].updatedAt = Date()
+                    if customers[index].status == .needsGeocode {
+                        customers[index].status = .open
+                    }
+                    return true
+                }
+            } catch {
+                continue
+            }
+        }
+        return false
+    }
+
+    private func geocodeQueries(for address: String) -> [String] {
+        geocodeCandidateQueries(address)
     }
 
     static func todayKey() -> String {

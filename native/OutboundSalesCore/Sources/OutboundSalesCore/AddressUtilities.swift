@@ -44,6 +44,49 @@ public func normalizeAddressForMapSearch(_ address: String) -> String {
     return base.joined(separator: " ")
 }
 
+public func expandAddressContext(_ address: String) -> String {
+    let normalized = normalizeAddressForMapSearch(address)
+    if normalized.range(of: #"^(수정구|중원구|분당구)\s"#, options: .regularExpression) != nil {
+        return "경기도 성남시 \(normalized)"
+    }
+    if normalized.hasPrefix("하남시 ") {
+        return "경기도 \(normalized)"
+    }
+    if normalized.range(of: #"^(강남구|강동구|강북구|강서구|관악구|광진구|구로구|금천구|노원구|도봉구|동대문구|동작구|마포구|서대문구|서초구|성동구|성북구|송파구|양천구|영등포구|용산구|은평구|종로구|중구|중랑구)\s"#, options: .regularExpression) != nil {
+        return "서울 \(normalized)"
+    }
+    return normalized
+}
+
+public func normalizeAddressForRoadSearch(_ address: String) -> String {
+    let exact = normalizeAddressForMapSearch(address)
+    let parts = exact.split(separator: " ").map(String.init)
+    guard let roadAddress = findRoadAddress(parts) else { return exact }
+    return (Array(parts.prefix(roadAddress.index)) + [roadAddress.road]).joined(separator: " ")
+}
+
+public func normalizeAddressForBroadRoadSearch(_ address: String) -> String {
+    let roadOnly = normalizeAddressForRoadSearch(address)
+    let parts = roadOnly.split(separator: " ").map(String.init)
+    guard let roadAddress = findRoadAddress(parts) else { return roadOnly }
+    let broadRoad = roadAddress.road.replacingOccurrences(of: #"\d+(?:번)?길$"#, with: "", options: .regularExpression)
+    guard !broadRoad.isEmpty, broadRoad != roadAddress.road else { return roadOnly }
+    return (Array(parts.prefix(roadAddress.index)) + [broadRoad]).joined(separator: " ")
+}
+
+public func geocodeCandidateQueries(_ address: String) -> [String] {
+    uniqueNonEmpty([
+        normalizeAddressWhitespace(normalizeAddressText(address)),
+        expandAddressContext(address),
+        normalizeAddressForMapSearch(address),
+        expandAddressContext(normalizeAddressForRoadSearch(address)),
+        normalizeAddressForRoadSearch(address),
+        expandAddressContext(normalizeAddressForBroadRoadSearch(address)),
+        normalizeAddressForBroadRoadSearch(address),
+        "대한민국 \(normalizeAddressForMapSearch(address))"
+    ])
+}
+
 public func isSearchableAddress(_ address: String) -> Bool {
     let normalized = normalizeAddressWhitespace(normalizeAddressText(address))
     guard !normalized.isEmpty, !normalized.contains("주소 미확인") else { return false }
@@ -122,3 +165,12 @@ extension Array {
     }
 }
 
+private func uniqueNonEmpty(_ values: [String]) -> [String] {
+    var seen = Set<String>()
+    return values.compactMap { value in
+        let trimmed = normalizeAddressWhitespace(value)
+        guard !trimmed.isEmpty, !seen.contains(trimmed) else { return nil }
+        seen.insert(trimmed)
+        return trimmed
+    }
+}

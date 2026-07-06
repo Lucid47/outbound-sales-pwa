@@ -57,6 +57,12 @@ struct CustomerMapView: View {
                     }
                 }
             }
+            .task {
+                if mappedCustomers.isEmpty {
+                    await state.geocodeVisibleCustomers()
+                }
+                fitMappedCustomers()
+            }
         }
     }
 
@@ -76,6 +82,7 @@ struct CustomerMapView: View {
 }
 
 private struct MapSummaryBanner: View {
+    @EnvironmentObject private var state: NativeAppState
     let selectedListName: String
     let mappedCount: Int
     let totalCount: Int
@@ -97,11 +104,11 @@ private struct MapSummaryBanner: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if mappedCount == 0 {
-                Text("좌표가 있는 고객이 없습니다. 주소 좌표 변환은 다음 단계에서 연결합니다.")
+                Text(state.geocodeMessage.isEmpty ? "좌표가 있는 고객이 없습니다. 우측 상단 핀 버튼으로 주소를 변환하세요." : state.geocodeMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                Text("좌표가 있는 고객을 지도에 표시하고 있습니다.")
+                Text(state.geocodeMessage.isEmpty ? "좌표가 있는 고객을 지도에 표시하고 있습니다." : state.geocodeMessage)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

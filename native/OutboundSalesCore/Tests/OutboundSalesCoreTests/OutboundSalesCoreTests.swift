@@ -50,6 +50,14 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(isSearchableAddress("서울 강남구 테헤란로 152"))
     }
 
+    func testBuildsAppleMapGeocodeCandidates() {
+        let candidates = geocodeCandidateQueries("경기도 하남시 미사강변한강로30")
+
+        XCTAssertTrue(candidates.contains("경기도 하남시 미사강변한강로30"))
+        XCTAssertTrue(candidates.contains("경기도 하남시 미사강변한강로 30"))
+        XCTAssertTrue(candidates.contains("대한민국 경기도 하남시 미사강변한강로 30"))
+    }
+
     func testSavesAndLoadsNativeSnapshot() throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
