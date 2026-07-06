@@ -167,8 +167,13 @@ struct CustomersView: View {
                                 .padding(.vertical, 28)
                         } else {
                             ForEach(filteredCustomers) { customer in
-                                CustomerActionCard(customer: customer, compact: displayMode == .list)
-                                    .environmentObject(state)
+                                if displayMode == .cards {
+                                    CustomerActionCard(customer: customer, compact: false)
+                                        .environmentObject(state)
+                                } else {
+                                    CustomerCompactRow(customer: customer)
+                                        .environmentObject(state)
+                                }
                             }
                         }
                     }

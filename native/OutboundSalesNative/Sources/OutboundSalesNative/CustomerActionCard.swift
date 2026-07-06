@@ -180,3 +180,156 @@ struct CustomerActionCard: View {
         }
     }
 }
+
+struct CustomerCompactRow: View {
+    @EnvironmentObject private var state: NativeAppState
+    @Environment(\.openURL) private var openURL
+    let customer: Customer
+
+    var body: some View {
+        HStack(spacing: 8) {
+            statusDot
+
+            NavigationLink {
+                CustomerDetailView(customerId: customer.id)
+                    .environmentObject(state)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(customer.name.isEmpty ? "이름 없음" : customer.name)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        if !customer.phoneNumber.isEmpty {
+                            Text(customer.phoneNumber)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Text(compactAddressLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 2) {
+                iconButton("전화", "phone.fill", disabled: !hasDialablePhone(customer.phoneNumber)) {
+                    callCustomer()
+                }
+                iconButton("문자", "message.fill", disabled: !hasDialablePhone(customer.phoneNumber)) {
+                    smsCustomer()
+                }
+                iconButton("길찾기", "location.fill", disabled: customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil) {
+                    navigateCustomer()
+                }
+                iconButton(customer.status == .done ? "완료취소" : "완료", customer.status == .done ? "arrow.uturn.backward" : "checkmark", disabled: false) {
+                    if customer.status == .done {
+                        state.toggleDone(customer)
+                    } else {
+                        state.completeVisit(customer: customer)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 2)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(red: 0.894, green: 0.91, blue: 0.937))
+                .frame(height: 1)
+        }
+    }
+
+    private var statusDot: some View {
+        Circle()
+            .fill(statusColor)
+            .frame(width: 8, height: 8)
+            .accessibilityHidden(true)
+    }
+
+    private var compactAddressLine: String {
+        let address = customer.address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let region = customer.region ?? extractRegion(customer.address)
+        if address.isEmpty {
+            return region.isEmpty ? "주소 없음" : region
+        }
+        return region.isEmpty || region == "주소 없음" ? address : "\(region) · \(address)"
+    }
+
+    private var statusColor: Color {
+        switch customer.status {
+        case .done:
+            return .green
+        case .needsGeocode, .hold:
+            return .orange
+        case .open:
+            return .blue
+        }
+    }
+
+    private func iconButton(_ title: String, _ icon: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(disabled ? .secondary.opacity(0.45) : Color(red: 0.122, green: 0.435, blue: 0.922))
+        .disabled(disabled)
+        .accessibilityLabel(title)
+    }
+
+    private func callCustomer() {
+        state.recordContact(customer: customer, type: .call)
+        if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
+            openURL(url)
+        }
+    }
+
+    private func smsCustomer() {
+        state.recordContact(customer: customer, type: .manualSms)
+        if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
+            openURL(url)
+        }
+    }
+
+    private func navigateCustomer() {
+        let tmapURL = tmapURLForCustomer()
+        openURL(tmapURL) { accepted in
+            if !accepted {
+                openAppleMaps()
+            }
+        }
+    }
+
+    private func tmapURLForCustomer() -> URL {
+        let goalName = (customer.name.isEmpty ? customer.address : customer.name)
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let latitude = customer.latitude, let longitude = customer.longitude {
+            return URL(string: "tmap://route?goalx=\(longitude)&goaly=\(latitude)&goalname=\(goalName)")!
+        }
+        let destination = (normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address))
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "tmap://?search=\(destination)")!
+    }
+
+    private func openAppleMaps() {
+        if let latitude = customer.latitude, let longitude = customer.longitude {
+            let item = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)))
+            item.name = customer.name
+            item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+            return
+        }
+        let destination = normalizeAddressForMapSearch(customer.address).isEmpty ? customer.address : normalizeAddressForMapSearch(customer.address)
+        if let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+           let url = URL(string: "http://maps.apple.com/?daddr=\(encoded)") {
+            openURL(url)
+        }
+    }
+}
