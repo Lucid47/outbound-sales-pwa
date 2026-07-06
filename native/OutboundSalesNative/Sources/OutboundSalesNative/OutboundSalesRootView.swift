@@ -28,6 +28,7 @@ public struct OutboundSalesRootView: View {
                 .environmentObject(state)
                 .tabItem { Label("설정", systemImage: "gearshape") }
         }
+        .preferredColorScheme(.light)
         .task {
             await state.performStartupMaintenance()
         }
