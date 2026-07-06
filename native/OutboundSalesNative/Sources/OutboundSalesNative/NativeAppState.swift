@@ -299,6 +299,21 @@ public final class NativeAppState: ObservableObject {
         recordContact(customer: customer, type: .note, result: .saved, messageBody: trimmed)
     }
 
+    func markContactExportResults(_ results: [ContactExportCustomerResult]) {
+        guard !results.isEmpty else { return }
+        let now = Date()
+        for result in results {
+            guard let index = customers.firstIndex(where: { $0.id == result.customerId }) else { continue }
+            customers[index].contactRegistrationStatus = result.status
+            customers[index].contactIdentifier = result.contactIdentifier
+            customers[index].contactRegisteredAt = now
+            customers[index].contactRegisteredName = result.registeredName
+            customers[index].updatedAt = now
+        }
+        actionMessage = "연락처 등록 결과를 저장했습니다."
+        persist()
+    }
+
     public func completeVisit(customer: Customer, memo: String = "") {
         let now = Date()
         visitLogs.insert(

@@ -39,6 +39,13 @@ public enum CoordinateSource: String, Codable, Sendable {
     case geocoded
 }
 
+public enum ContactRegistrationStatus: String, Codable, Sendable {
+    case registered
+    case updated
+    case skippedDuplicate
+    case failed
+}
+
 public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -74,6 +81,10 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
     public var geocodeQuery: String?
     public var region: String?
     public var status: CustomerStatus
+    public var contactRegistrationStatus: ContactRegistrationStatus?
+    public var contactIdentifier: String?
+    public var contactRegisteredAt: Date?
+    public var contactRegisteredName: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -92,6 +103,10 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         geocodeQuery: String? = nil,
         region: String? = nil,
         status: CustomerStatus = .open,
+        contactRegistrationStatus: ContactRegistrationStatus? = nil,
+        contactIdentifier: String? = nil,
+        contactRegisteredAt: Date? = nil,
+        contactRegisteredName: String? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -109,6 +124,10 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         self.geocodeQuery = geocodeQuery
         self.region = region
         self.status = status
+        self.contactRegistrationStatus = contactRegistrationStatus
+        self.contactIdentifier = contactIdentifier
+        self.contactRegisteredAt = contactRegisteredAt
+        self.contactRegisteredName = contactRegisteredName
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

@@ -226,6 +226,12 @@ struct CustomersView: View {
 
 struct ActiveListPanel: View {
     @EnvironmentObject private var state: NativeAppState
+    @State private var showingContactExport = false
+
+    private var selectedListCustomers: [Customer] {
+        guard let list = state.selectedList else { return [] }
+        return state.customers.filter { $0.customerListId == list.id }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -258,11 +264,27 @@ struct ActiveListPanel: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.white)
                 .foregroundStyle(Color(red: 0.086, green: 0.125, blue: 0.196))
+
+                Button {
+                    showingContactExport = true
+                } label: {
+                    Label("연락처 등록", systemImage: "person.crop.circle.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.102, green: 0.737, blue: 0.306))
+                .disabled(state.selectedList == nil || selectedListCustomers.isEmpty)
             }
         }
         .padding(12)
         .background(Color(red: 0.086, green: 0.125, blue: 0.196))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $showingContactExport) {
+            if let selectedList = state.selectedList {
+                ContactExportSheet(list: selectedList, customers: selectedListCustomers)
+                    .environmentObject(state)
+            }
+        }
     }
 
     private var activeListSubtitle: String {

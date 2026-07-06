@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>고객리스트 문서를 촬영해 OCR로 가져오기 위해 카메라를 사용합니다.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>가져온 고객을 연락처 그룹으로 일괄 등록하기 위해 연락처 접근 권한이 필요합니다.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>촬영한 고객리스트 사진을 OCR로 가져오기 위해 사진 보관함을 사용합니다.</string>
 	<key>UIApplicationSceneManifest</key>
