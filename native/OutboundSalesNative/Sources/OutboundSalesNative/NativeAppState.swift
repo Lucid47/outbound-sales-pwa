@@ -14,7 +14,7 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var selectedListId: String?
     @Published public var searchText = ""
     @Published public var importMessage = ""
-    @Published public var ocrMessage = "문서 스캔 OCR은 다음 단계에서 VisionKit으로 연결합니다."
+    @Published public var ocrMessage = "사진을 선택하면 Apple Vision OCR로 표를 CSV로 변환합니다."
     @Published public private(set) var storageMessage = ""
     @Published public private(set) var actionMessage = ""
     @Published public private(set) var geocodeMessage = ""
@@ -344,6 +344,70 @@ public final class NativeAppState: ObservableObject {
             .filter { $0.customerId == customer.id }
             .map { ($0.visitedAt, "방문 완료", $0.memo ?? "방문 기록") }
         return (contacts + visits).sorted { $0.0 > $1.0 }
+    }
+
+    public func latestHistorySummary(for customer: Customer) -> (title: String, detail: String, at: Date)? {
+        guard let latest = logs(for: customer).first else { return nil }
+        return (latest.1, latest.2, latest.0)
+    }
+
+    public func progressLabel(for customer: Customer) -> String {
+        if customer.status == .done {
+            return "완료"
+        }
+        return logs(for: customer).isEmpty ? "미터치" : "진행중"
+    }
+
+    public func updateMessageTemplate(_ template: MessageTemplate, title: String, body: String, isDefault: Bool) {
+        guard let index = messageTemplates.firstIndex(where: { $0.id == template.id }) else { return }
+        messageTemplates[index].title = title
+        messageTemplates[index].body = body
+        messageTemplates[index].isDefault = isDefault
+        messageTemplates[index].updatedAt = Date()
+        persist()
+    }
+
+    public func createMessageTemplate(title: String, body: String) {
+        let now = Date()
+        messageTemplates.append(
+            MessageTemplate(
+                id: UUID().uuidString,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "새 문자 템플릿" : title,
+                body: body,
+                createdAt: now,
+                updatedAt: now
+            )
+        )
+        persist()
+    }
+
+    public func deleteMessageTemplate(_ template: MessageTemplate) {
+        messageTemplates.removeAll { $0.id == template.id }
+        persist()
+    }
+
+    public func recognizeOCRCSV(url: URL, headers: [String] = []) async -> String? {
+        let accessGranted = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        ocrMessage = "사진에서 텍스트를 인식하는 중..."
+        do {
+            let result = try await Task.detached {
+                try recognizeCustomerListImage(at: url, headers: headers, headerMode: .auto)
+            }.value
+            ocrMessage = "OCR 완료: \(result.boxes.count)개 텍스트, \(result.table.rows.count)행, \(result.table.columnCount)열"
+            if !result.table.warnings.isEmpty {
+                ocrMessage += " · 일부 행은 확인이 필요합니다."
+            }
+            return result.csv.csv
+        } catch {
+            ocrMessage = "사진 OCR에 실패했습니다."
+            return nil
+        }
     }
 
     public func exportSnapshotData() throws -> Data {
