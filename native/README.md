@@ -16,6 +16,17 @@ docs/customer-list-ocr.md
 
 특히 UI는 SwiftUI 기본 `List` 스타일로 대체하지 말고, `docs/ui-reference.md`와 `src/App.css`를 기준으로 색상, 여백, 카드, 버튼, 하단 탭 구조를 맞춥니다.
 
+네이티브 화면 구현 전에는 반드시 아래 PWA 원본 파일을 직접 열어 현재 구현을 확인합니다.
+
+```text
+src/App.tsx
+src/App.css
+src/db/appDb.ts
+src/googleDriveSync.ts
+```
+
+문서와 원본 파일 사이에 차이가 있으면 원본 파일을 우선합니다. 다만 iOS 안전영역, 권한 요청, 전화/문자/지도 앱 전환, 파일/사진 선택기처럼 네이티브 플랫폼 제약이 있는 부분은 iOS 관례를 따르며, 사용 흐름과 결과만 PWA와 같게 유지합니다.
+
 ## 구조
 
 ```text
