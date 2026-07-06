@@ -1,6 +1,7 @@
 import OutboundSalesCore
 import SwiftUI
 #if os(iOS)
+import MessageUI
 import UIKit
 #endif
 #if os(macOS)
@@ -12,14 +13,16 @@ struct MessageComposerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     let customer: Customer
+    #if os(iOS)
+    @State private var draft: MessageDraft?
+    #endif
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     Button {
-                        state.recordContact(customer: customer, type: .manualSms)
-                        openMessages()
+                        startMessage(body: nil, type: .manualSms, templateId: nil)
                     } label: {
                         Label("일반 문자 보내기", systemImage: "message")
                     }
@@ -27,7 +30,7 @@ struct MessageComposerSheet: View {
                 } header: {
                     Text(customer.name.isEmpty ? customer.phoneNumber : "\(customer.name) · \(customer.phoneNumber)")
                 } footer: {
-                    Text("템플릿 문자는 본문을 클립보드에 복사한 뒤 문자앱을 엽니다.")
+                    Text("템플릿 문자는 수신번호와 본문이 입력된 문자 작성창을 엽니다.")
                 }
 
                 Section("문자 템플릿") {
@@ -38,15 +41,7 @@ struct MessageComposerSheet: View {
                         ForEach(state.messageTemplates) { template in
                             Button {
                                 let body = render(template.body)
-                                copyToClipboard(body)
-                                state.recordContact(
-                                    customer: customer,
-                                    type: .templateSms,
-                                    result: .opened,
-                                    messageBody: body,
-                                    templateId: template.id
-                                )
-                                openMessages()
+                                startMessage(body: body, type: .templateSms, templateId: template.id)
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
@@ -74,6 +69,17 @@ struct MessageComposerSheet: View {
                 }
             }
         }
+        #if os(iOS)
+        .sheet(item: $draft) { draft in
+            MessageComposeController(
+                recipients: [draft.recipient],
+                body: draft.body
+            ) {
+                self.draft = nil
+                dismiss()
+            }
+        }
+        #endif
     }
 
     private func render(_ body: String) -> String {
@@ -86,11 +92,42 @@ struct MessageComposerSheet: View {
             .replacingOccurrences(of: "{{주소}}", with: customer.address)
     }
 
-    private func openMessages() {
-        if let url = URL(string: "sms:\(cleanPhone(customer.phoneNumber))") {
+    private func startMessage(body: String?, type: ContactLogType, templateId: String?) {
+        state.recordContact(
+            customer: customer,
+            type: type,
+            result: .opened,
+            messageBody: body,
+            templateId: templateId
+        )
+
+        let recipient = cleanPhone(customer.phoneNumber)
+        #if os(iOS)
+        if MFMessageComposeViewController.canSendText() {
+            draft = MessageDraft(recipient: recipient, body: body)
+            return
+        }
+        #endif
+
+        openMessagesFallback(recipient: recipient, body: body)
+        dismiss()
+    }
+
+    private func openMessagesFallback(recipient: String, body: String?) {
+        if let body, !body.isEmpty {
+            copyToClipboard(body)
+        }
+        if let url = smsURL(recipient: recipient, body: body) {
             openURL(url)
         }
-        dismiss()
+    }
+
+    private func smsURL(recipient: String, body: String?) -> URL? {
+        guard let body, !body.isEmpty else {
+            return URL(string: "sms:\(recipient)")
+        }
+        let encoded = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "sms:\(recipient)&body=\(encoded)")
     }
 
     private func copyToClipboard(_ value: String) {
@@ -102,3 +139,46 @@ struct MessageComposerSheet: View {
         #endif
     }
 }
+
+#if os(iOS)
+private struct MessageDraft: Identifiable {
+    let id = UUID()
+    let recipient: String
+    let body: String?
+}
+
+private struct MessageComposeController: UIViewControllerRepresentable {
+    let recipients: [String]
+    let body: String?
+    let onFinish: @MainActor () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onFinish: onFinish)
+    }
+
+    func makeUIViewController(context: Context) -> MFMessageComposeViewController {
+        let controller = MFMessageComposeViewController()
+        controller.messageComposeDelegate = context.coordinator
+        controller.recipients = recipients
+        controller.body = body ?? ""
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: MFMessageComposeViewController, context: Context) {}
+
+    @MainActor
+    final class Coordinator: NSObject, @preconcurrency MFMessageComposeViewControllerDelegate {
+        let onFinish: @MainActor () -> Void
+
+        init(onFinish: @escaping @MainActor () -> Void) {
+            self.onFinish = onFinish
+        }
+
+        func messageComposeViewController(_ controller: MFMessageComposeViewController, didFinishWith result: MessageComposeResult) {
+            controller.dismiss(animated: true) {
+                self.onFinish()
+            }
+        }
+    }
+}
+#endif
