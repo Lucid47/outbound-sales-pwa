@@ -16,11 +16,20 @@ public enum CSVImportError: Error, Equatable, Sendable {
     case empty
 }
 
-public func parseCSV(_ text: String) throws -> ParsedCSV {
+public func parseCSV(_ text: String, firstRowIsHeader: Bool = true) throws -> ParsedCSV {
     let rows = parseCSVRows(text)
         .filter { row in row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
-    guard let headers = rows.first else { throw CSVImportError.empty }
-    let dataRows = Array(rows.dropFirst())
+    guard !rows.isEmpty else { throw CSVImportError.empty }
+    let columnCount = rows.map(\.count).max() ?? 0
+    let headers: [String]
+    let dataRows: [[String]]
+    if firstRowIsHeader, let firstRow = rows.first {
+        headers = firstRow
+        dataRows = Array(rows.dropFirst())
+    } else {
+        headers = (0..<columnCount).map { "열\($0 + 1)" }
+        dataRows = rows
+    }
     return ParsedCSV(headers: headers, rows: dataRows, mapping: detectMapping(headers: headers))
 }
 
@@ -108,4 +117,3 @@ func escapeCSVField(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
     return needsQuotes ? "\"\(escaped)\"" : escaped
 }
-

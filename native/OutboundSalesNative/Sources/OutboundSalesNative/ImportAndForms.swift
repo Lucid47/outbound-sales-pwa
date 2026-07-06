@@ -13,6 +13,10 @@ struct ImportView: View {
     @State private var showingFileImporter = false
     @State private var showingCreateList = false
     @State private var showingAddCustomer = false
+    @State private var csvPreviewText = ""
+    @State private var csvPreviewSourceFileName = "붙여넣기.csv"
+    @State private var csvFirstRowIsHeader = true
+    @State private var csvPreview: ParsedCSV?
     @State private var csvText = """
     이름,전화번호,주소,메모
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
@@ -30,7 +34,7 @@ struct ImportView: View {
                     Button {
                         showingFileImporter = true
                     } label: {
-                        Label("CSV 파일 선택", systemImage: "doc.badge.plus")
+                        Label("CSV 파일 선택 후 매핑 확인", systemImage: "doc.badge.plus")
                     }
 
                     Label("엑셀 파일(.xlsx)은 다음 단계에서 연결합니다.", systemImage: "tablecells")
@@ -63,9 +67,47 @@ struct ImportView: View {
                         .frame(minHeight: 180)
 
                     Button {
-                        state.importCSV(text: csvText, companyName: companyName, listName: listName)
+                        loadCSVPreview(text: csvText, sourceFileName: "붙여넣기.csv")
                     } label: {
-                        Label("붙여넣은 CSV 가져오기", systemImage: "square.and.arrow.down")
+                        Label("붙여넣은 CSV 분석", systemImage: "tablecells")
+                    }
+                }
+
+                if let parsed = csvPreview {
+                    Section {
+                        Toggle("첫 행을 헤더로 사용", isOn: $csvFirstRowIsHeader)
+
+                        ForEach(FieldKey.allCases, id: \.self) { field in
+                            Picker(fieldLabel(field), selection: mappingSelection(field)) {
+                                Text("사용 안 함").tag(-1)
+                                ForEach(parsed.headers.indices, id: \.self) { index in
+                                    Text("\(index + 1). \(parsed.headers[index])").tag(index)
+                                }
+                            }
+                        }
+
+                        if let firstRow = parsed.rows.first {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("첫 데이터 미리보기")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(parsed.headers.indices, id: \.self) { index in
+                                    Text("\(index + 1). \(parsed.headers[index]): \(index < firstRow.count ? firstRow[index] : "")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+
+                        Button {
+                            saveMappedCSV()
+                        } label: {
+                            Label("매핑한 CSV를 고객리스트로 저장", systemImage: "square.and.arrow.down")
+                        }
+                    } header: {
+                        Text("컬럼 매핑 확인")
+                    } footer: {
+                        Text("헤더가 없으면 첫 행을 헤더로 사용을 끄고, 열1/열2/열3을 이름·연락처·주소 등에 직접 매핑하세요.")
                     }
                 }
 
@@ -83,7 +125,7 @@ struct ImportView: View {
                 switch result {
                 case .success(let urls):
                     guard let url = urls.first else { return }
-                    state.importFile(url: url, companyName: companyName, listName: listName)
+                    loadCSVPreview(url: url)
                 case .failure:
                     state.importMessage = "파일 선택을 완료하지 못했습니다."
                 }
@@ -96,7 +138,75 @@ struct ImportView: View {
                 AddCustomerView()
                     .environmentObject(state)
             }
+            .onChange(of: csvFirstRowIsHeader) { _, _ in
+                guard !csvPreviewText.isEmpty else { return }
+                loadCSVPreview(text: csvPreviewText, sourceFileName: csvPreviewSourceFileName)
+            }
         }
+    }
+
+    private func loadCSVPreview(url: URL) {
+        let accessGranted = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessGranted {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let fileName = url.lastPathComponent
+        let fileExtension = url.pathExtension.lowercased()
+        guard fileExtension != "xlsx" && fileExtension != "xls" else {
+            state.importMessage = "엑셀 파일 가져오기는 다음 단계에서 연결합니다. 현재는 CSV 파일을 사용할 수 있습니다."
+            return
+        }
+
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            loadCSVPreview(text: text, sourceFileName: fileName)
+        } catch {
+            state.importMessage = "파일을 읽지 못했습니다."
+        }
+    }
+
+    private func loadCSVPreview(text: String, sourceFileName: String) {
+        do {
+            csvPreviewText = text
+            csvPreviewSourceFileName = sourceFileName
+            csvPreview = try parseCSV(text, firstRowIsHeader: csvFirstRowIsHeader)
+            state.importMessage = "CSV를 분석했습니다. 컬럼 매핑을 확인하세요."
+        } catch {
+            csvPreview = nil
+            state.importMessage = "CSV를 읽지 못했습니다."
+        }
+    }
+
+    private func mappingSelection(_ field: FieldKey) -> Binding<Int> {
+        Binding(
+            get: {
+                csvPreview?.mapping[field] ?? -1
+            },
+            set: { value in
+                guard var next = csvPreview else { return }
+                next.mapping[field] = value < 0 ? nil : value
+                csvPreview = next
+            }
+        )
+    }
+
+    private func saveMappedCSV() {
+        guard let parsed = csvPreview else {
+            state.importMessage = "먼저 CSV를 분석하세요."
+            return
+        }
+        guard parsed.mapping[.name] != nil else {
+            state.importMessage = "고객명으로 사용할 열을 선택하세요."
+            return
+        }
+        guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil else {
+            state.importMessage = "연락처 또는 주소 열 중 하나는 필요합니다."
+            return
+        }
+        state.importParsedCSV(parsed, companyName: companyName, listName: listName, sourceFileName: csvPreviewSourceFileName)
     }
 }
 
@@ -109,6 +219,25 @@ enum ImportFileType {
         excelWorkbook,
         legacyExcelWorkbook
     ]
+}
+
+private func fieldLabel(_ field: FieldKey) -> String {
+    switch field {
+    case .name:
+        return "고객명"
+    case .phoneNumber:
+        return "연락처"
+    case .address:
+        return "주소"
+    case .birthDate:
+        return "생년월일"
+    case .notes:
+        return "메모"
+    case .latitude:
+        return "위도"
+    case .longitude:
+        return "경도"
+    }
 }
 
 struct OCRImportView: View {

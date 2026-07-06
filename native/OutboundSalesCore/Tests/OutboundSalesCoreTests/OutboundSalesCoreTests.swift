@@ -4,7 +4,7 @@ import XCTest
 final class OutboundSalesCoreTests: XCTestCase {
     func testDetectsCsvMappingFromKoreanHeaders() throws {
         let parsed = try parseCSV("""
-        성명,핸드폰1,우편물주소,비고
+        성명,핸드폰1,우편물수령지,비고
         홍길동,010-1234-5678,서울 강남구 테헤란로 152,오후 방문
         """)
 
@@ -12,6 +12,16 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(parsed.mapping[.phoneNumber], 1)
         XCTAssertEqual(parsed.mapping[.address], 2)
         XCTAssertEqual(parsed.mapping[.notes], 3)
+    }
+
+    func testParsesHeaderlessCsvForManualMapping() throws {
+        let parsed = try parseCSV("""
+        홍길동,010-1234-5678,서울 강남구 테헤란로 152
+        """, firstRowIsHeader: false)
+
+        XCTAssertEqual(parsed.headers, ["열1", "열2", "열3"])
+        XCTAssertEqual(parsed.rows.count, 1)
+        XCTAssertNil(parsed.mapping[.name] ?? nil)
     }
 
     func testParsesQuotedCsvFields() throws {

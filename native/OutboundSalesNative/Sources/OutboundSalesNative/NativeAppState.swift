@@ -131,27 +131,31 @@ public final class NativeAppState: ObservableObject {
     public func importCSV(text: String, companyName: String, listName: String, sourceFileName: String = "import.csv") {
         do {
             let parsed = try parseCSV(text)
-            let now = Date()
-            let list = CustomerList(
-                id: UUID().uuidString,
-                name: listName.isEmpty ? sourceFileName : listName,
-                companyName: companyName.isEmpty ? "고객사 미지정" : companyName,
-                sourceFileName: sourceFileName,
-                importedAt: now,
-                createdAt: now,
-                updatedAt: now
-            )
-            let importedCustomers = customersFromCSV(parsed, customerListId: list.id, now: now)
-            customerLists.insert(list, at: 0)
-            customers.append(contentsOf: importedCustomers)
-            selectedListId = list.id
-            importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
-            persist()
-            Task {
-                await geocodeVisibleCustomers()
-            }
+            importParsedCSV(parsed, companyName: companyName, listName: listName, sourceFileName: sourceFileName)
         } catch {
             importMessage = "CSV를 읽지 못했습니다."
+        }
+    }
+
+    public func importParsedCSV(_ parsed: ParsedCSV, companyName: String, listName: String, sourceFileName: String = "import.csv") {
+        let now = Date()
+        let list = CustomerList(
+            id: UUID().uuidString,
+            name: listName.isEmpty ? sourceFileName : listName,
+            companyName: companyName.isEmpty ? "고객사 미지정" : companyName,
+            sourceFileName: sourceFileName,
+            importedAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+        let importedCustomers = customersFromCSV(parsed, customerListId: list.id, now: now)
+        customerLists.insert(list, at: 0)
+        customers.append(contentsOf: importedCustomers)
+        selectedListId = list.id
+        importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
+        persist()
+        Task {
+            await geocodeVisibleCustomers()
         }
     }
 
