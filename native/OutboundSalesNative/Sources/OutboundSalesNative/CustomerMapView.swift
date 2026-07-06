@@ -347,6 +347,13 @@ struct CustomerHistorySheet: View {
                     LabeledContent("연락처", value: customer.phoneNumber.isEmpty ? "연락처 없음" : customer.phoneNumber)
                     LabeledContent("진행상태", value: state.progressLabel(for: customer))
                 }
+                Section("빠른 작업") {
+                    Button {
+                        state.addToTodaySchedule(customer)
+                    } label: {
+                        Label("오늘 스케줄 추가", systemImage: "calendar.badge.plus")
+                    }
+                }
                 Section("히스토리") {
                     let logs = state.logs(for: customer)
                     if logs.isEmpty {

@@ -629,6 +629,34 @@ struct CreateListView: View {
 struct LogsView: View {
     @EnvironmentObject private var state: NativeAppState
     @State private var selectedHistoryCustomer: Customer?
+    @State private var startDate = Calendar.current.date(
+        byAdding: .day,
+        value: -30,
+        to: Calendar.current.startOfDay(for: Date())
+    ) ?? Date()
+    @State private var endDate = Date()
+
+    private var historyPreviews: [CustomerHistoryPreview] {
+        guard let dateRange else { return [] }
+        return state.visibleCustomers.compactMap { customer in
+            let logs = state.logs(for: customer).filter { dateRange.contains($0.0) }
+            guard let latest = logs.first else { return nil }
+            return CustomerHistoryPreview(customer: customer, latest: latest, count: logs.count)
+        }
+    }
+
+    private var dateRange: ClosedRange<Date>? {
+        let start = Calendar.current.startOfDay(for: startDate)
+        guard let end = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: endDate),
+              start <= end else {
+            return nil
+        }
+        return start...end
+    }
+
+    private var periodLogCount: Int {
+        historyPreviews.reduce(0) { $0 + $1.count }
+    }
 
     var body: some View {
         NavigationStack {
@@ -641,45 +669,62 @@ struct LogsView: View {
                     LabeledContent("미완료 고객", value: "\(state.openCustomerCount)")
                 }
 
-                Section("고객별 히스토리") {
+                Section("조회 기간") {
+                    DatePicker("시작날짜", selection: $startDate, displayedComponents: .date)
+                    DatePicker("종료날짜", selection: $endDate, displayedComponents: .date)
+                    if dateRange == nil {
+                        Text("시작날짜가 종료날짜보다 늦습니다.")
+                            .foregroundStyle(.red)
+                    } else {
+                        LabeledContent("기간 내 고객", value: "\(historyPreviews.count)명")
+                        LabeledContent("기간 내 이력", value: "\(periodLogCount)건")
+                    }
+                }
+
+                Section("기간 내 고객별 히스토리") {
                     if state.visibleCustomers.isEmpty {
                         Text("기록 없음")
                             .foregroundStyle(.secondary)
+                    } else if dateRange == nil {
+                        Text("조회 기간을 다시 선택하세요.")
+                            .foregroundStyle(.secondary)
+                    } else if historyPreviews.isEmpty {
+                        Text("선택한 기간에 터치 이력이 없습니다.")
+                            .foregroundStyle(.secondary)
                     } else {
-                        ForEach(state.visibleCustomers) { customer in
+                        ForEach(historyPreviews) { preview in
                             Button {
-                                selectedHistoryCustomer = customer
+                                selectedHistoryCustomer = preview.customer
                             } label: {
                                 HStack(alignment: .center, spacing: 10) {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(customer.name.isEmpty ? "이름 없음" : customer.name)
+                                        Text(preview.customer.name.isEmpty ? "이름 없음" : preview.customer.name)
                                             .font(.title3.weight(.heavy))
                                             .foregroundStyle(.primary)
                                             .lineLimit(1)
                                             .minimumScaleFactor(0.82)
-                                        Text("\(customer.region ?? extractRegion(customer.address)) · \(customer.phoneNumber.isEmpty ? "연락처 없음" : customer.phoneNumber)")
+                                        Text("\(preview.customer.region ?? extractRegion(preview.customer.address)) · \(preview.customer.phoneNumber.isEmpty ? "연락처 없음" : preview.customer.phoneNumber)")
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
-                                        if let latest = state.latestHistorySummary(for: customer) {
-                                            Text("\(latest.title) · \(latest.at, format: .dateTime.month().day().hour().minute())")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        } else {
-                                            Text("아직 터치 이력 없음")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
+                                        Text("\(preview.latest.1) · \(preview.latest.0, format: .dateTime.month().day().hour().minute())")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text(state.progressLabel(for: customer))
-                                        .font(.caption)
-                                        .fontWeight(.bold)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(progressColor(for: customer).opacity(0.14))
-                                        .foregroundStyle(progressColor(for: customer))
-                                        .clipShape(Capsule())
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Text(state.progressLabel(for: preview.customer))
+                                            .font(.caption)
+                                            .fontWeight(.bold)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(progressColor(for: preview.customer).opacity(0.14))
+                                            .foregroundStyle(progressColor(for: preview.customer))
+                                            .clipShape(Capsule())
+                                        Text("\(preview.count)건")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                             .buttonStyle(.plain)
@@ -699,6 +744,14 @@ struct LogsView: View {
         if customer.status == .done { return .green }
         return state.logs(for: customer).isEmpty ? .secondary : .orange
     }
+}
+
+private struct CustomerHistoryPreview: Identifiable {
+    let customer: Customer
+    let latest: (Date, String, String)
+    let count: Int
+
+    var id: String { customer.id }
 }
 
 struct SettingsView: View {
