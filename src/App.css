@@ -423,6 +423,10 @@ button:disabled {
   margin: 0;
 }
 
+.manual-list-form {
+  margin-bottom: 12px;
+}
+
 .customer-row > div:first-child,
 .log-row > div,
 .template-row {

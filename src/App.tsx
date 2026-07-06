@@ -665,6 +665,9 @@ function App() {
   const [importCompany, setImportCompany] = useState('')
   const [importListName, setImportListName] = useState('')
   const [importSourceFile, setImportSourceFile] = useState('')
+  const [showManualListForm, setShowManualListForm] = useState(false)
+  const [manualListCompany, setManualListCompany] = useState('')
+  const [manualListName, setManualListName] = useState('')
   const [newTemplateTitle, setNewTemplateTitle] = useState('')
   const [newTemplateBody, setNewTemplateBody] = useState('')
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null)
@@ -1597,6 +1600,47 @@ function App() {
     showToast(`${list.name} 고객리스트를 삭제했습니다`)
   }
 
+  async function createManualCustomerList() {
+    const companyName = manualListCompany.trim()
+    const listName = manualListName.trim()
+    if (!companyName || !listName) {
+      showToast('고객사 이름과 고객리스트 이름을 입력하세요')
+      return
+    }
+    const now = new Date().toISOString()
+    const listId = makeId('list')
+    const list: CustomerList = {
+      id: listId,
+      name: listName,
+      companyName,
+      sourceFileName: '수동 등록',
+      importedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }
+    const schedule: VisitSchedule = {
+      id: makeId('schedule'),
+      customerListId: listId,
+      date: todayKey(),
+      title: `${list.name} 오늘 스케줄`,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await appDb.transaction('rw', appDb.customerLists, appDb.visitSchedules, async () => {
+      await appDb.customerLists.add(list)
+      await appDb.visitSchedules.add(schedule)
+    })
+    setActiveListId(listId)
+    setSelectedCustomerId('')
+    setManualListCompany('')
+    setManualListName('')
+    setShowManualListForm(false)
+    markLocalDataChanged()
+    await refresh()
+    showToast(`${list.name} 고객리스트를 만들었습니다`)
+  }
+
   function openNewCustomerSheet() {
     if (!activeList) {
       showToast('고객리스트를 먼저 선택하세요')
@@ -2040,6 +2084,22 @@ function App() {
       <>
         <section className="panel">
           <PanelTitle title="가져온 고객리스트" meta={`${customerLists.length}개`} />
+          <div className="list-toolbar">
+            <button className="primary" type="button" onClick={() => setShowManualListForm((current) => !current)}>
+              <Plus size={18} />
+              수동 리스트 만들기
+            </button>
+          </div>
+          {showManualListForm && (
+            <div className="form-panel manual-list-form">
+              <input value={manualListCompany} onChange={(event) => setManualListCompany(event.target.value)} placeholder="고객사 이름" />
+              <input value={manualListName} onChange={(event) => setManualListName(event.target.value)} placeholder="고객리스트 이름" />
+              <div className="template-actions">
+                <button className="primary" type="button" onClick={() => void createManualCustomerList()}><Save size={18} /> 만들기</button>
+                <button className="secondary" type="button" onClick={() => setShowManualListForm(false)}>취소</button>
+              </div>
+            </div>
+          )}
           <div className="list-stack">
             {customerLists.map((list) => {
               const summary = renderListSummary(list)
