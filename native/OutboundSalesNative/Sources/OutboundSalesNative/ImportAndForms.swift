@@ -124,14 +124,44 @@ struct OCRImportView: View {
 struct AddCustomerView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
+    @State private var targetListId: String
     @State private var name = ""
     @State private var phoneNumber = ""
     @State private var address = ""
     @State private var notes = ""
 
+    init(initialListId: String? = nil) {
+        self._targetListId = State(initialValue: initialListId ?? "")
+    }
+
+    private var selectedList: String {
+        if !targetListId.isEmpty {
+            return targetListId
+        }
+        return state.selectedListId ?? state.customerLists.first?.id ?? ""
+    }
+
+    private var selectedListName: String {
+        state.customerLists.first { $0.id == selectedList }?.name ?? "선택된 리스트 없음"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("추가할 고객리스트") {
+                    if state.customerLists.isEmpty {
+                        Text("먼저 고객리스트를 생성하세요.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("고객리스트", selection: $targetListId) {
+                            ForEach(state.customerLists) { list in
+                                Text(list.name).tag(list.id)
+                            }
+                        }
+                        LabeledContent("대상", value: selectedListName)
+                    }
+                }
+
                 TextField("이름", text: $name)
                 TextField("연락처", text: $phoneNumber)
                     #if os(iOS)
@@ -147,10 +177,15 @@ struct AddCustomerView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("저장") {
-                        state.addCustomer(name: name, phoneNumber: phoneNumber, address: address, notes: notes)
+                        state.addCustomer(to: selectedList, name: name, phoneNumber: phoneNumber, address: address, notes: notes)
                         dismiss()
                     }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(selectedList.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .onAppear {
+                if targetListId.isEmpty {
+                    targetListId = state.selectedListId ?? state.customerLists.first?.id ?? ""
                 }
             }
         }

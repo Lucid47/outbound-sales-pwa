@@ -133,6 +133,11 @@ public final class NativeAppState: ObservableObject {
 
     public func addCustomer(name: String, phoneNumber: String, address: String, notes: String) {
         guard let listId = selectedListId else { return }
+        addCustomer(to: listId, name: name, phoneNumber: phoneNumber, address: address, notes: notes)
+    }
+
+    public func addCustomer(to listId: String, name: String, phoneNumber: String, address: String, notes: String) {
+        guard customerLists.contains(where: { $0.id == listId }) else { return }
         let now = Date()
         customers.insert(
             Customer(
@@ -149,6 +154,7 @@ public final class NativeAppState: ObservableObject {
             ),
             at: 0
         )
+        selectedListId = listId
         persist()
     }
 
