@@ -181,3 +181,47 @@ struct CustomerPhotoGrid: View {
         return photoLogs
     }
 }
+
+struct CustomerHistoryEntryRow: View {
+    @EnvironmentObject private var state: NativeAppState
+    let entry: CustomerHistoryEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 10) {
+                if let photoLog = entry.photoLog {
+                    AsyncImage(url: state.photoURL(for: photoLog, thumbnail: true)) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        case .failure:
+                            Image(systemName: "photo")
+                                .foregroundStyle(.secondary)
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                    .frame(width: 72, height: 72)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.title)
+                        .font(.headline)
+                    Text(entry.detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(entry.at, format: .dateTime.year().month().day().hour().minute())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}

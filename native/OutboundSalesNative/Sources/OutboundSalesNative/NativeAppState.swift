@@ -8,6 +8,14 @@ import UIKit
 import AppKit
 #endif
 
+public struct CustomerHistoryEntry: Identifiable, Equatable {
+    public var id: String
+    public var at: Date
+    public var title: String
+    public var detail: String
+    public var photoLog: CustomerPhotoLog?
+}
+
 @MainActor
 public final class NativeAppState: ObservableObject {
     @Published public private(set) var customerLists: [CustomerList]
@@ -95,6 +103,10 @@ public final class NativeAppState: ObservableObject {
 
     public var doneCustomerCount: Int {
         visibleCustomers.filter { $0.status == .done }.count
+    }
+
+    public var touchLogCount: Int {
+        contactLogs.count + photoLogs.count
     }
 
     public var todaySchedule: VisitSchedule? {
@@ -429,13 +441,42 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func logs(for customer: Customer) -> [(Date, String, String)] {
+        historyEntries(for: customer).map { ($0.at, $0.title, $0.detail) }
+    }
+
+    public func historyEntries(for customer: Customer) -> [CustomerHistoryEntry] {
         let contacts = contactLogs
             .filter { $0.customerId == customer.id }
-            .map { ($0.createdAt, contactTitle($0), $0.messageBody ?? contactResultText($0.result)) }
+            .map {
+                CustomerHistoryEntry(
+                    id: "contact-\($0.id)",
+                    at: $0.createdAt,
+                    title: contactTitle($0),
+                    detail: $0.messageBody ?? contactResultText($0.result)
+                )
+            }
         let visits = visitLogs
             .filter { $0.customerId == customer.id }
-            .map { ($0.visitedAt, "방문 완료", $0.memo ?? "방문 기록") }
-        return (contacts + visits).sorted { $0.0 > $1.0 }
+            .map {
+                CustomerHistoryEntry(
+                    id: "visit-\($0.id)",
+                    at: $0.visitedAt,
+                    title: "방문 완료",
+                    detail: $0.memo ?? "방문 기록"
+                )
+            }
+        let photos = photoLogs
+            .filter { $0.customerId == customer.id }
+            .map {
+                CustomerHistoryEntry(
+                    id: "photo-\($0.id)",
+                    at: $0.createdAt,
+                    title: "사진 기록",
+                    detail: $0.caption ?? photoSourceText($0.source),
+                    photoLog: $0
+                )
+            }
+        return (contacts + visits + photos).sorted { $0.at > $1.at }
     }
 
     public func latestHistorySummary(for customer: Customer) -> (title: String, detail: String, at: Date)? {
@@ -682,6 +723,17 @@ public final class NativeAppState: ObservableObject {
         case .saved: return "저장됨"
         case .cancelled: return "취소"
         case .unknown: return "상태 미확인"
+        }
+    }
+
+    private func photoSourceText(_ source: CustomerPhotoSource) -> String {
+        switch source {
+        case .camera:
+            return "카메라 촬영"
+        case .photoLibrary:
+            return "사진앱 선택"
+        case .file:
+            return "이미지 파일"
         }
     }
 

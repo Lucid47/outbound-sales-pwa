@@ -678,11 +678,11 @@ struct LogsView: View {
         isDateFilterEnabled ? "기간 내 고객별 히스토리" : "전체 고객별 히스토리"
     }
 
-    private func filteredLogs(for customer: Customer) -> [(Date, String, String)] {
-        let logs = state.logs(for: customer)
+    private func filteredLogs(for customer: Customer) -> [CustomerHistoryEntry] {
+        let logs = state.historyEntries(for: customer)
         guard isDateFilterEnabled else { return logs }
         guard let dateRange else { return [] }
-        return logs.filter { dateRange.contains($0.0) }
+        return logs.filter { dateRange.contains($0.at) }
     }
 
     var body: some View {
@@ -690,7 +690,7 @@ struct LogsView: View {
             List {
                 Section("누적 상태") {
                     LabeledContent("전체 고객", value: "\(state.visibleCustomers.count)")
-                    LabeledContent("터치 기록", value: "\(state.contactLogs.count)")
+                    LabeledContent("터치 기록", value: "\(state.touchLogCount)")
                     LabeledContent("방문 기록", value: "\(state.visitLogs.count)")
                     LabeledContent("완료 고객", value: "\(state.doneCustomerCount)")
                     LabeledContent("미완료 고객", value: "\(state.openCustomerCount)")
@@ -741,7 +741,7 @@ struct LogsView: View {
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
-                                        Text("\(preview.latest.1) · \(preview.latest.0, format: .dateTime.month().day().hour().minute())")
+                                        Text("\(preview.latest.title) · \(preview.latest.at, format: .dateTime.month().day().hour().minute())")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -776,13 +776,13 @@ struct LogsView: View {
 
     private func progressColor(for customer: Customer) -> Color {
         if customer.status == .done { return .green }
-        return state.logs(for: customer).isEmpty ? .secondary : .orange
+        return state.historyEntries(for: customer).isEmpty ? .secondary : .orange
     }
 }
 
 private struct CustomerHistoryPreview: Identifiable {
     let customer: Customer
-    let latest: (Date, String, String)
+    let latest: CustomerHistoryEntry
     let count: Int
 
     var id: String { customer.id }

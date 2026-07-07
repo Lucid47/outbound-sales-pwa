@@ -131,22 +131,14 @@ struct CustomerDetailView: View {
                     }
 
                     Section("히스토리") {
-                        let logs = state.logs(for: customer)
-                        if logs.isEmpty {
+                        let entries = state.historyEntries(for: customer)
+                        if entries.isEmpty {
                             Text("기록 없음")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(Array(logs.enumerated()), id: \.offset) { _, log in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(log.1)
-                                        .font(.headline)
-                                    Text(log.2)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    Text(log.0, style: .date)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                            ForEach(entries) { entry in
+                                CustomerHistoryEntryRow(entry: entry)
+                                    .environmentObject(state)
                             }
                         }
                     }

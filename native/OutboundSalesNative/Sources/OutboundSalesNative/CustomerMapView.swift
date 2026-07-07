@@ -8,9 +8,16 @@ struct CustomerMapView: View {
     @State private var selectedCustomerId: String?
     @State private var noteCustomer: Customer?
     @State private var historyCustomer: Customer?
+    @State private var showAllCustomers = true
+
+    private var filteredCustomers: [Customer] {
+        guard !showAllCustomers else { return state.visibleCustomers }
+        let scheduledIds = Set(state.todayScheduledCustomers.map(\.id))
+        return state.visibleCustomers.filter { scheduledIds.contains($0.id) }
+    }
 
     private var mappedCustomers: [Customer] {
-        state.visibleCustomers.filter { $0.latitude != nil && $0.longitude != nil }
+        filteredCustomers.filter { $0.latitude != nil && $0.longitude != nil }
     }
 
     private var selectedCustomer: Customer? {
@@ -48,7 +55,8 @@ struct CustomerMapView: View {
                     MapSummaryBanner(
                         selectedListName: state.selectedList?.name ?? "전체 고객",
                         mappedCount: mappedCustomers.count,
-                        totalCount: state.visibleCustomers.count
+                        totalCount: filteredCustomers.count,
+                        showAllCustomers: $showAllCustomers
                     )
 
                     if let selectedCustomer {
@@ -89,6 +97,13 @@ struct CustomerMapView: View {
             .task {
                 if mappedCustomers.isEmpty {
                     await state.geocodeVisibleCustomers()
+                }
+                fitMappedCustomers()
+            }
+            .onChange(of: showAllCustomers) { _, _ in
+                if let selectedCustomerId,
+                   !filteredCustomers.contains(where: { $0.id == selectedCustomerId }) {
+                    self.selectedCustomerId = nil
                 }
                 fitMappedCustomers()
             }
@@ -355,22 +370,14 @@ struct CustomerHistorySheet: View {
                     }
                 }
                 Section("히스토리") {
-                    let logs = state.logs(for: customer)
-                    if logs.isEmpty {
+                    let entries = state.historyEntries(for: customer)
+                    if entries.isEmpty {
                         Text("아직 터치 이력 없음")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(logs.enumerated()), id: \.offset) { _, log in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(log.1)
-                                    .font(.headline)
-                                Text(log.2)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Text(log.0, format: .dateTime.month().day().hour().minute())
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        ForEach(entries) { entry in
+                            CustomerHistoryEntryRow(entry: entry)
+                                .environmentObject(state)
                         }
                     }
                 }
@@ -390,9 +397,10 @@ private struct MapSummaryBanner: View {
     let selectedListName: String
     let mappedCount: Int
     let totalCount: Int
+    @Binding var showAllCustomers: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(selectedListName)
                     .font(.headline)
@@ -403,8 +411,14 @@ private struct MapSummaryBanner: View {
                     .foregroundStyle(.secondary)
             }
 
+            Toggle(isOn: $showAllCustomers) {
+                Text(showAllCustomers ? "전체 고객 표시" : "오늘 스케줄 고객만 표시")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .toggleStyle(.switch)
+
             if totalCount == 0 {
-                Text("고객리스트를 가져오거나 고객을 추가하면 지도에서 확인할 수 있습니다.")
+                Text(showAllCustomers ? "고객리스트를 가져오거나 고객을 추가하면 지도에서 확인할 수 있습니다." : "오늘 스케줄에 포함된 고객이 없습니다.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if mappedCount == 0 {
