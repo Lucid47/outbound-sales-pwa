@@ -6,6 +6,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var customers: [Customer]
     public var visitLogs: [VisitLog]
     public var contactLogs: [ContactLog]
+    public var photoLogs: [CustomerPhotoLog]
     public var visitSchedules: [VisitSchedule]
     public var visitScheduleItems: [VisitScheduleItem]
     public var messageTemplates: [MessageTemplate]
@@ -18,6 +19,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         customers: [Customer],
         visitLogs: [VisitLog] = [],
         contactLogs: [ContactLog] = [],
+        photoLogs: [CustomerPhotoLog] = [],
         visitSchedules: [VisitSchedule] = [],
         visitScheduleItems: [VisitScheduleItem] = [],
         messageTemplates: [MessageTemplate] = [],
@@ -29,6 +31,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.customers = customers
         self.visitLogs = visitLogs
         self.contactLogs = contactLogs
+        self.photoLogs = photoLogs
         self.visitSchedules = visitSchedules
         self.visitScheduleItems = visitScheduleItems
         self.messageTemplates = messageTemplates
@@ -43,6 +46,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.customers = try container.decodeIfPresent([Customer].self, forKey: .customers) ?? []
         self.visitLogs = try container.decodeIfPresent([VisitLog].self, forKey: .visitLogs) ?? []
         self.contactLogs = try container.decodeIfPresent([ContactLog].self, forKey: .contactLogs) ?? []
+        self.photoLogs = try container.decodeIfPresent([CustomerPhotoLog].self, forKey: .photoLogs) ?? []
         self.visitSchedules = try container.decodeIfPresent([VisitSchedule].self, forKey: .visitSchedules) ?? []
         self.visitScheduleItems = try container.decodeIfPresent([VisitScheduleItem].self, forKey: .visitScheduleItems) ?? []
         self.messageTemplates = try container.decodeIfPresent([MessageTemplate].self, forKey: .messageTemplates) ?? []
@@ -89,6 +93,26 @@ public struct NativeAppFileStore: Sendable {
     public func delete() throws {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         try FileManager.default.removeItem(at: fileURL)
+    }
+
+    public func deleteAllAppData() throws {
+        let directory = fileURL.deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try FileManager.default.removeItem(at: directory)
+    }
+
+    public func photoURL(fileName: String) -> URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent(fileName)
+    }
+
+    public func writePhotoData(_ data: Data, fileName: String) throws {
+        let url = photoURL(fileName: fileName)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: [.atomic])
+    }
+
+    public func readPhotoData(fileName: String) throws -> Data {
+        try Data(contentsOf: photoURL(fileName: fileName))
     }
 
     public static func defaultFileURL() -> URL {

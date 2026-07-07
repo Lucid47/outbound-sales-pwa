@@ -1,6 +1,12 @@
 import CoreLocation
 import Foundation
 import OutboundSalesCore
+#if os(iOS)
+import UIKit
+#endif
+#if os(macOS)
+import AppKit
+#endif
 
 @MainActor
 public final class NativeAppState: ObservableObject {
@@ -8,6 +14,7 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var customers: [Customer]
     @Published public private(set) var visitLogs: [VisitLog]
     @Published public private(set) var contactLogs: [ContactLog]
+    @Published public private(set) var photoLogs: [CustomerPhotoLog]
     @Published public private(set) var visitSchedules: [VisitSchedule]
     @Published public private(set) var visitScheduleItems: [VisitScheduleItem]
     @Published public private(set) var messageTemplates: [MessageTemplate]
@@ -16,7 +23,7 @@ public final class NativeAppState: ObservableObject {
     @Published public var importMessage = ""
     @Published public var ocrMessage = "사진을 선택하면 Apple Vision OCR로 표를 CSV로 변환합니다."
     @Published public private(set) var storageMessage = ""
-    @Published public private(set) var actionMessage = ""
+    @Published public var actionMessage = ""
     @Published public private(set) var geocodeMessage = ""
 
     private let fileStore: NativeAppFileStore
@@ -32,6 +39,7 @@ public final class NativeAppState: ObservableObject {
                 self.customers = snapshot.customers
                 self.visitLogs = snapshot.visitLogs
                 self.contactLogs = snapshot.contactLogs
+                self.photoLogs = snapshot.photoLogs
                 self.visitSchedules = snapshot.visitSchedules
                 self.visitScheduleItems = snapshot.visitScheduleItems
                 self.messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
@@ -49,6 +57,7 @@ public final class NativeAppState: ObservableObject {
             self.customers = seed.customers
             self.visitLogs = seed.visitLogs
             self.contactLogs = []
+            self.photoLogs = []
             self.visitSchedules = []
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
@@ -58,6 +67,7 @@ public final class NativeAppState: ObservableObject {
             self.customers = []
             self.visitLogs = []
             self.contactLogs = []
+            self.photoLogs = []
             self.visitSchedules = []
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
@@ -299,6 +309,49 @@ public final class NativeAppState: ObservableObject {
         recordContact(customer: customer, type: .note, result: .saved, messageBody: trimmed)
     }
 
+    public func photos(for customer: Customer) -> [CustomerPhotoLog] {
+        photoLogs
+            .filter { $0.customerId == customer.id }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func photoURL(for log: CustomerPhotoLog, thumbnail: Bool = false) -> URL {
+        fileStore.photoURL(fileName: thumbnail ? log.thumbnailFileName : log.fileName)
+    }
+
+    public func addPhoto(customer: Customer, imageData: Data, source: CustomerPhotoSource, caption: String = "") {
+        let now = Date()
+        let photoId = UUID().uuidString
+        let basePath = "customer-photos/\(customer.customerListId)/\(customer.id)"
+        let fileName = "\(basePath)/\(photoId).jpg"
+        let thumbnailFileName = "\(basePath)/\(photoId)-thumb.jpg"
+        let originalData = Self.jpegData(from: imageData, maxDimension: 2200, compression: 0.86) ?? imageData
+        let thumbnailData = Self.jpegData(from: imageData, maxDimension: 420, compression: 0.78) ?? originalData
+
+        do {
+            try fileStore.writePhotoData(originalData, fileName: fileName)
+            try fileStore.writePhotoData(thumbnailData, fileName: thumbnailFileName)
+            photoLogs.insert(
+                CustomerPhotoLog(
+                    id: photoId,
+                    customerListId: customer.customerListId,
+                    customerId: customer.id,
+                    fileName: fileName,
+                    thumbnailFileName: thumbnailFileName,
+                    source: source,
+                    caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
+                    syncStatus: .localOnly,
+                    createdAt: now
+                ),
+                at: 0
+            )
+            actionMessage = "사진 기록을 저장했습니다."
+            persist()
+        } catch {
+            actionMessage = "사진 기록 저장에 실패했습니다."
+        }
+    }
+
     func markContactExportResults(_ results: [ContactExportCustomerResult]) {
         guard !results.isEmpty else { return }
         let now = Date()
@@ -454,7 +507,18 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func exportSnapshotData() throws -> Data {
-        try fileStore.encoder.encode(snapshot())
+        let snapshot = snapshot()
+        let photos = photoLogs.map { log in
+            NativePhotoBackupItem(
+                id: log.id,
+                fileName: log.fileName,
+                thumbnailFileName: log.thumbnailFileName,
+                imageDataBase64: try? fileStore.readPhotoData(fileName: log.fileName).base64EncodedString(),
+                thumbnailDataBase64: try? fileStore.readPhotoData(fileName: log.thumbnailFileName).base64EncodedString()
+            )
+        }
+        let backup = NativeFullBackup(schemaVersion: 2, snapshot: snapshot, photos: photos)
+        return try fileStore.encoder.encode(backup)
     }
 
     public func importSnapshot(url: URL) {
@@ -466,20 +530,42 @@ public final class NativeAppState: ObservableObject {
         }
         do {
             let data = try Data(contentsOf: url)
+            if let backup = try? fileStore.decoder.decode(NativeFullBackup.self, from: data) {
+                restore(snapshot: backup.snapshot)
+                for photo in backup.photos {
+                    if let imageBase64 = photo.imageDataBase64,
+                       let imageData = Data(base64Encoded: imageBase64) {
+                        try? fileStore.writePhotoData(imageData, fileName: photo.fileName)
+                    }
+                    if let thumbnailBase64 = photo.thumbnailDataBase64,
+                       let thumbnailData = Data(base64Encoded: thumbnailBase64) {
+                        try? fileStore.writePhotoData(thumbnailData, fileName: photo.thumbnailFileName)
+                    }
+                }
+                persist()
+                storageMessage = "사진을 포함한 전체 백업을 가져왔습니다."
+                return
+            }
+
             let snapshot = try fileStore.decoder.decode(NativeAppSnapshot.self, from: data)
-            customerLists = snapshot.customerLists
-            customers = snapshot.customers
-            visitLogs = snapshot.visitLogs
-            contactLogs = snapshot.contactLogs
-            visitSchedules = snapshot.visitSchedules
-            visitScheduleItems = snapshot.visitScheduleItems
-            messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
-            selectedListId = snapshot.selectedListId ?? customerLists.first?.id
+            restore(snapshot: snapshot)
             persist()
             storageMessage = "백업을 가져왔습니다."
         } catch {
             storageMessage = "백업을 가져오지 못했습니다."
         }
+    }
+
+    private func restore(snapshot: NativeAppSnapshot) {
+        customerLists = snapshot.customerLists
+        customers = snapshot.customers
+        visitLogs = snapshot.visitLogs
+        contactLogs = snapshot.contactLogs
+        photoLogs = snapshot.photoLogs
+        visitSchedules = snapshot.visitSchedules
+        visitScheduleItems = snapshot.visitScheduleItems
+        messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
+        selectedListId = snapshot.selectedListId ?? customerLists.first?.id
     }
 
     public func geocodeVisibleCustomers() async {
@@ -529,6 +615,7 @@ public final class NativeAppState: ObservableObject {
             customers = seed.customers
             visitLogs = seed.visitLogs
             contactLogs = []
+            photoLogs = []
             visitSchedules = []
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
@@ -538,13 +625,14 @@ public final class NativeAppState: ObservableObject {
             customers = []
             visitLogs = []
             contactLogs = []
+            photoLogs = []
             visitSchedules = []
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
             selectedListId = nil
         }
         do {
-            try fileStore.delete()
+            try fileStore.deleteAllAppData()
             storageMessage = "로컬 데이터를 초기화했습니다."
         } catch {
             storageMessage = "로컬 데이터 초기화에 실패했습니다."
@@ -566,6 +654,7 @@ public final class NativeAppState: ObservableObject {
             customers: customers,
             visitLogs: visitLogs,
             contactLogs: contactLogs,
+            photoLogs: photoLogs,
             visitSchedules: visitSchedules,
             visitScheduleItems: visitScheduleItems,
             messageTemplates: messageTemplates,
@@ -704,7 +793,70 @@ public final class NativeAppState: ObservableObject {
             )
         ]
     }
+
+    private static func jpegData(from data: Data, maxDimension: CGFloat, compression: CGFloat) -> Data? {
+        #if os(iOS)
+        guard let image = UIImage(data: data) else { return nil }
+        let scaled = image.scaled(maxDimension: maxDimension)
+        return scaled.jpegData(compressionQuality: compression)
+        #elseif os(macOS)
+        guard let image = NSImage(data: data) else { return nil }
+        let scaled = image.scaled(maxDimension: maxDimension)
+        guard let tiffData = scaled.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: compression])
+        #else
+        return nil
+        #endif
+    }
 }
+
+private struct NativeFullBackup: Codable {
+    var schemaVersion: Int
+    var snapshot: NativeAppSnapshot
+    var photos: [NativePhotoBackupItem]
+}
+
+private struct NativePhotoBackupItem: Codable {
+    var id: String
+    var fileName: String
+    var thumbnailFileName: String
+    var imageDataBase64: String?
+    var thumbnailDataBase64: String?
+}
+
+#if os(iOS)
+private extension UIImage {
+    func scaled(maxDimension: CGFloat) -> UIImage {
+        let largestSide = max(size.width, size.height)
+        guard largestSide > maxDimension, largestSide > 0 else { return self }
+        let ratio = maxDimension / largestSide
+        let targetSize = CGSize(width: size.width * ratio, height: size.height * ratio)
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+    }
+}
+#endif
+
+#if os(macOS)
+private extension NSImage {
+    func scaled(maxDimension: CGFloat) -> NSImage {
+        let largestSide = max(size.width, size.height)
+        guard largestSide > maxDimension, largestSide > 0 else { return self }
+        let ratio = maxDimension / largestSide
+        let targetSize = CGSize(width: size.width * ratio, height: size.height * ratio)
+        let image = NSImage(size: targetSize)
+        image.lockFocus()
+        draw(in: CGRect(origin: .zero, size: targetSize), from: .zero, operation: .copy, fraction: 1)
+        image.unlockFocus()
+        return image
+    }
+}
+#endif
 
 private extension DateFormatter {
     static let nativeDateOnly: DateFormatter = {

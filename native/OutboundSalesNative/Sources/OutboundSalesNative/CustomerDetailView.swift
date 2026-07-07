@@ -14,6 +14,7 @@ struct CustomerDetailView: View {
     let customerId: String
     @State private var showingEdit = false
     @State private var showingMessageSheet = false
+    @State private var showingPhotoSheet = false
     @State private var noteText = ""
     @State private var visitMemo = ""
 
@@ -63,7 +64,33 @@ struct CustomerDetailView: View {
                             Label("길찾기", systemImage: "location")
                         }
                         .disabled(customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil)
+
+                        Button {
+                            showingPhotoSheet = true
+                        } label: {
+                            Label("사진 기록", systemImage: "camera.fill")
+                        }
                     }
+
+                    Section("사진 기록") {
+                        let photos = state.photos(for: customer)
+                        if photos.isEmpty {
+                            Button {
+                                showingPhotoSheet = true
+                            } label: {
+                                Label("첫 사진 추가", systemImage: "camera.fill")
+                            }
+                        } else {
+                            CustomerPhotoGrid(photoLogs: photos)
+                                .environmentObject(state)
+                            Button {
+                                showingPhotoSheet = true
+                            } label: {
+                                Label("사진 추가", systemImage: "plus")
+                            }
+                        }
+                    }
+
                     Section("상태와 스케줄") {
                         Button {
                             state.toggleDone(customer)
@@ -138,6 +165,10 @@ struct CustomerDetailView: View {
                 }
                 .sheet(isPresented: $showingMessageSheet) {
                     MessageComposerSheet(customer: customer)
+                        .environmentObject(state)
+                }
+                .sheet(isPresented: $showingPhotoSheet) {
+                    CustomerPhotoCaptureSheet(customer: customer)
                         .environmentObject(state)
                 }
             } else {

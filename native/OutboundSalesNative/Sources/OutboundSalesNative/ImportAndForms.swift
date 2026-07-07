@@ -808,13 +808,13 @@ struct SettingsView: View {
                             backupFile = nil
                         }
                     } label: {
-                        Label("JSON 백업 내보내기", systemImage: "square.and.arrow.up")
+                        Label("사진 포함 전체 백업 내보내기", systemImage: "square.and.arrow.up")
                     }
 
                     Button {
                         showingBackupImporter = true
                     } label: {
-                        Label("JSON 백업 가져오기", systemImage: "square.and.arrow.down")
+                        Label("전체 백업 가져오기", systemImage: "square.and.arrow.down")
                     }
 
                     Button(role: .destructive) {
@@ -825,8 +825,8 @@ struct SettingsView: View {
                 }
 
                 Section("네이티브 앱") {
-                    Label("고객리스트와 고객 정보는 기기 안에 저장합니다.", systemImage: "externaldrive")
-                    Label("Google Drive 동기화는 계정 연동 단계에서 별도 연결합니다.", systemImage: "icloud")
+                    Label("고객리스트와 사진 기록은 앱 저장소에 함께 저장합니다.", systemImage: "externaldrive")
+                    Label("Google Drive 동기화는 전체 백업 파일을 기준으로 연결합니다.", systemImage: "icloud")
                 }
 
                 Section("문자 템플릿") {

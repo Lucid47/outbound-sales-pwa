@@ -516,7 +516,7 @@ PWA 지도:
 네이티브에서 동일 방향으로 가려면:
 
 - Google Sign-In 또는 OAuth 흐름 필요
-- Drive appDataFolder에 동일한 백업 JSON 구조 저장
+- Drive appDataFolder에 고객 데이터와 사진 기록을 포함한 전체 백업 구조 저장
 - PWA와 네이티브가 같은 계정 데이터와 호환되려면 JSON schema를 유지해야 함
 - 병합 정책도 PWA와 동일해야 함
 

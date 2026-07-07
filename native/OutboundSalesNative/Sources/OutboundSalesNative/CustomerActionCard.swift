@@ -9,6 +9,7 @@ struct CustomerActionCard: View {
     let compact: Bool
     @State private var showingEdit = false
     @State private var showingMessageSheet = false
+    @State private var showingPhotoSheet = false
 
     private let primaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     private let secondaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
@@ -16,30 +17,38 @@ struct CustomerActionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(customer.name.isEmpty ? "이름 없음" : customer.name)
-                        .font(compact ? .title3.weight(.heavy) : .title2.weight(.heavy))
-                        .foregroundStyle(AppPalette.textPrimary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.82)
-                    Text(regionLine)
-                        .font(.caption)
-                        .foregroundStyle(AppPalette.textSecondary)
-                    if !customer.phoneNumber.isEmpty {
-                        Text(customer.phoneNumber)
-                            .font(.subheadline.weight(.semibold))
+                NavigationLink {
+                    CustomerDetailView(customerId: customer.id)
+                        .environmentObject(state)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(customer.name.isEmpty ? "이름 없음" : customer.name)
+                            .font(compact ? .title3.weight(.heavy) : .title2.weight(.heavy))
                             .foregroundStyle(AppPalette.textPrimary)
-                    }
-                    Text(customer.address.isEmpty ? "주소 없음" : customer.address)
-                        .font(.subheadline)
-                        .foregroundStyle(AppPalette.textSecondary)
-                        .lineLimit(compact ? 1 : 2)
-                    if !compact, let latest = state.logs(for: customer).first {
-                        Text("최근: \(latest.1)")
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.82)
+                        Text(regionLine)
                             .font(.caption)
                             .foregroundStyle(AppPalette.textSecondary)
+                        if !customer.phoneNumber.isEmpty {
+                            Text(customer.phoneNumber)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AppPalette.textPrimary)
+                        }
+                        Text(customer.address.isEmpty ? "주소 없음" : customer.address)
+                            .font(.subheadline)
+                            .foregroundStyle(AppPalette.textSecondary)
+                            .lineLimit(compact ? 1 : 2)
+                        if !compact, let latest = state.logs(for: customer).first {
+                            Text("최근: \(latest.1)")
+                                .font(.caption)
+                                .foregroundStyle(AppPalette.textSecondary)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 Text(customer.status == .done ? "완료" : customer.status == .needsGeocode ? "위치확인" : "미완")
                     .font(.caption.weight(.bold))
@@ -72,14 +81,9 @@ struct CustomerActionCard: View {
                     showingEdit = true
                 }
 
-                NavigationLink {
-                    CustomerDetailView(customerId: customer.id)
-                        .environmentObject(state)
-                } label: {
-                    Label("상세", systemImage: "calendar.badge.clock")
-                        .actionButtonLabel()
+                actionButton("사진", "camera.fill", color: Color(red: 0.44, green: 0.35, blue: 0.82)) {
+                    showingPhotoSheet = true
                 }
-                .buttonStyle(ColoredActionButtonStyle(color: Color(red: 0.44, green: 0.35, blue: 0.82)))
 
                 actionButton("스케줄", "calendar.badge.plus", color: Color(red: 0.84, green: 0.48, blue: 0.12)) {
                     state.addToTodaySchedule(customer)
@@ -111,6 +115,10 @@ struct CustomerActionCard: View {
         }
         .sheet(isPresented: $showingMessageSheet) {
             MessageComposerSheet(customer: customer)
+                .environmentObject(state)
+        }
+        .sheet(isPresented: $showingPhotoSheet) {
+            CustomerPhotoCaptureSheet(customer: customer)
                 .environmentObject(state)
         }
     }

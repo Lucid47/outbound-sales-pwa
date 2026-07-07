@@ -46,6 +46,19 @@ public enum ContactRegistrationStatus: String, Codable, Sendable {
     case failed
 }
 
+public enum CustomerPhotoSource: String, Codable, Sendable {
+    case camera
+    case photoLibrary
+    case file
+}
+
+public enum CustomerPhotoSyncStatus: String, Codable, Sendable {
+    case localOnly
+    case pendingUpload
+    case synced
+    case failed
+}
+
 public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -171,6 +184,40 @@ public struct ContactLog: Identifiable, Codable, Equatable, Sendable {
         self.templateId = templateId
         self.messageBody = messageBody
         self.result = result
+        self.createdAt = createdAt
+    }
+}
+
+public struct CustomerPhotoLog: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var customerListId: String
+    public var customerId: String
+    public var fileName: String
+    public var thumbnailFileName: String
+    public var source: CustomerPhotoSource
+    public var caption: String?
+    public var syncStatus: CustomerPhotoSyncStatus
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        customerListId: String,
+        customerId: String,
+        fileName: String,
+        thumbnailFileName: String,
+        source: CustomerPhotoSource,
+        caption: String? = nil,
+        syncStatus: CustomerPhotoSyncStatus = .localOnly,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.customerListId = customerListId
+        self.customerId = customerId
+        self.fileName = fileName
+        self.thumbnailFileName = thumbnailFileName
+        self.source = source
+        self.caption = caption
+        self.syncStatus = syncStatus
         self.createdAt = createdAt
     }
 }
