@@ -793,6 +793,8 @@ struct SettingsView: View {
     @State private var showingResetConfirmation = false
     @State private var showingBackupImporter = false
     @State private var showingBackupExporter = false
+    @State private var showingDriveBackup = false
+    @State private var showingDriveRestore = false
     @State private var backupFile: BackupDocument?
 
     var body: some View {
@@ -826,7 +828,79 @@ struct SettingsView: View {
 
                 Section("네이티브 앱") {
                     Label("고객리스트와 사진 기록은 앱 저장소에 함께 저장합니다.", systemImage: "externaldrive")
-                    Label("Google Drive 동기화는 전체 백업 파일을 기준으로 연결합니다.", systemImage: "icloud")
+                    Label("Google Drive 동기화는 전체/선택 백업 구조를 사용합니다.", systemImage: "icloud")
+                }
+
+                Section("Google Drive 동기화") {
+                    if !state.isGoogleDriveConfigured {
+                        Label("Google iOS OAuth Client ID 설정이 필요합니다.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    }
+
+                    if let account = state.driveAccount {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(account.name)
+                                .font(.headline)
+                            Text(account.email)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let last = state.lastDriveSyncAt {
+                                Text("마지막 동기화: \(last, format: .dateTime.year().month().day().hour().minute())")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Button(role: .destructive) {
+                            state.disconnectGoogleDrive()
+                        } label: {
+                            Label("연결 해제", systemImage: "xmark.circle")
+                        }
+                    } else {
+                        Button {
+                            Task { await state.connectGoogleDrive() }
+                        } label: {
+                            Label("Google 계정으로 연결", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(!state.isGoogleDriveConfigured || state.driveSyncBusy)
+                    }
+
+                    Button {
+                        Task { await state.syncGoogleDriveAll() }
+                    } label: {
+                        Label("Drive와 전체 동기화", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(!state.isGoogleDriveConfigured || state.driveAccount == nil || state.driveSyncBusy)
+
+                    Button {
+                        Task { await state.saveAllToGoogleDrive() }
+                    } label: {
+                        Label("현재 기기 전체를 Drive에 저장", systemImage: "icloud.and.arrow.up")
+                    }
+                    .disabled(!state.isGoogleDriveConfigured || state.driveAccount == nil || state.driveSyncBusy)
+
+                    Button {
+                        showingDriveRestore = true
+                    } label: {
+                        Label("Drive에서 복원", systemImage: "icloud.and.arrow.down")
+                    }
+                    .disabled(!state.isGoogleDriveConfigured || state.driveAccount == nil || state.driveSyncBusy)
+
+                    Button {
+                        showingDriveBackup = true
+                    } label: {
+                        Label("Drive 백업 파일 만들기", systemImage: "doc.badge.plus")
+                    }
+                    .disabled(!state.isGoogleDriveConfigured || state.driveAccount == nil || state.driveSyncBusy)
+
+                    if state.driveSyncBusy {
+                        ProgressView("Google Drive 작업 중...")
+                    }
+                    if !state.driveSyncMessage.isEmpty {
+                        Text(state.driveSyncMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("문자 템플릿") {
@@ -874,6 +948,14 @@ struct SettingsView: View {
                 contentType: .json,
                 defaultFilename: "outbound-sales-backup.json"
             ) { _ in }
+            .sheet(isPresented: $showingDriveBackup) {
+                GoogleDriveBackupSheet()
+                    .environmentObject(state)
+            }
+            .sheet(isPresented: $showingDriveRestore) {
+                GoogleDriveRestoreSheet()
+                    .environmentObject(state)
+            }
         }
     }
 }

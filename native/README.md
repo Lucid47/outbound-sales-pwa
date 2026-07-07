@@ -81,6 +81,12 @@ native/
 - 기록 탭의 고객별 히스토리 목록과 고객별 전체 이력 시트
 - 설정 탭의 문자 템플릿 추가/수정/삭제
 - JSON 백업 내보내기/가져오기
+- Google Drive 동기화/백업
+  - Google Drive appDataFolder에 네이티브 전용 전체 동기화 파일 저장/복원
+  - 전체 일괄 백업/복원
+  - 고객리스트별 선택 백업/복원
+  - 고객리스트/고객/히스토리/스케줄/문자 템플릿/사진 기록과 실제 사진 데이터를 백업에 포함
+  - 일반 Google Drive 백업 파일 생성 지원
 - Apple CLGeocoder 기반 주소 좌표 변환
   - CSV import, 수동 추가, 주소 수정, 앱 시작 시 기존 미변환 고객을 좌표 변환
   - 원본 주소, 도로명 정규화 주소, 보강 주소를 순차 시도
@@ -139,15 +145,38 @@ open native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj
 
 Xcode에서 `OutboundSalesiOS` scheme을 선택하면 됩니다. 현재 iOS 시뮬레이터 런타임은 설치되어 있지 않으므로 화면 실행 검증은 실제 기기 연결 또는 시뮬레이터 추가 설치 후 진행합니다.
 
-## 로컬 데이터
+## 로컬 데이터와 Google Drive
 
 네이티브 앱의 1차 로컬 저장은 앱 샌드박스의 Application Support 영역에 보관합니다. 고객리스트/고객/히스토리/스케줄/템플릿 메타데이터는 `native-data.json` 파일에 저장하고, 고객별 사진 기록은 같은 앱 저장소의 `customer-photos/` 폴더에 저장합니다. 고객정보 파일과 사진 파일은 Git에 포함하지 않습니다.
 
-Google Drive 동기화는 PWA의 웹 OAuth Client ID를 그대로 사용할 수 없습니다. 네이티브 앱에서 완전 구현하려면 iOS OAuth Client ID, URL Scheme, Google Sign-In 또는 동등한 OAuth 흐름, appDataFolder 권한 검증이 필요합니다. 그 전까지는 고객리스트와 사진 데이터를 함께 담는 전체 JSON 백업 내보내기/가져오기를 안전한 임시 동기화 경로로 사용합니다.
+Google Drive 동기화 코드는 네이티브 앱에 구현되어 있습니다. 다만 PWA의 웹 OAuth Client ID를 그대로 사용할 수 없으므로, 실제 Google 로그인/동기화 테스트 전에는 Google Cloud에서 iOS OAuth Client ID를 발급하고 아래 값을 설정해야 합니다.
+
+```text
+Bundle ID: com.lucid47.outboundsales
+Redirect URI: com.lucid47.outboundsales:/oauth2redirect
+Info.plist: GoogleDriveOAuthClientID
+Info.plist: GoogleDriveRedirectScheme
+```
+
+Google Cloud에서는 OAuth Client를 만들 때 application type을 `iOS`로 선택합니다. 웹용 Client ID나 PWA의 `VITE_GOOGLE_CLIENT_ID`를 네이티브 앱에 넣지 않습니다.
+
+현재 네이티브 구현은 Google Sign-In SDK가 아니라 `ASWebAuthenticationSession` + Authorization Code + PKCE 방식입니다. 따라서 client secret은 앱에 넣지 않으며, `GoogleDriveOAuthClientID`에는 iOS Client ID만 넣습니다. URL scheme은 `Info.plist`의 `CFBundleURLTypes`와 `GoogleDriveRedirectScheme`이 서로 같아야 합니다.
+
+필요 scope는 아래와 같습니다.
+
+```text
+openid
+email
+profile
+https://www.googleapis.com/auth/drive.appdata
+https://www.googleapis.com/auth/drive.file
+```
+
+Google Drive 기본 동기화는 appDataFolder의 `soheega-ganda-native-sync.json` 파일을 사용합니다. 사용자가 직접 확인 가능한 백업 파일은 일반 Drive JSON 파일로 별도 생성합니다.
 
 ## 다음 단계
 
 - 실제 iPhone/iPad 연결 후 전화/문자/티맵/Apple 지도 앱 전환 확인
 - 엑셀 파일(.xlsx) import 파서 연결
 - OCR 실제 사진 품질별 반복 테스트와 컬럼 매핑 UI 고도화
-- Google Drive 계정 연동과 클라우드 동기화 연결
+- Google Cloud iOS OAuth Client ID 발급 후 실제 Google Drive 로그인/동기화 테스트

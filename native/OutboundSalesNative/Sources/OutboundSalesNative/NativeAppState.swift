@@ -33,13 +33,22 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var storageMessage = ""
     @Published public var actionMessage = ""
     @Published public private(set) var geocodeMessage = ""
+    @Published public private(set) var driveAccount: GoogleDriveAccount?
+    @Published public private(set) var driveSyncMessage = ""
+    @Published public private(set) var driveSyncBusy = false
+    @Published public private(set) var lastDriveSyncAt: Date?
+    @Published public private(set) var remoteDriveLists: [CustomerList] = []
 
     private let fileStore: NativeAppFileStore
     private let geocoder = CLGeocoder()
     private var didRunStartupMaintenance = false
+    private let driveService = GoogleDriveSyncService()
+    private var cachedRemoteBackup: NativeFullBackup?
 
     public init(seedSamples: Bool = false, fileStore: NativeAppFileStore = NativeAppFileStore()) {
         self.fileStore = fileStore
+        self.driveAccount = Self.loadDriveAccount()
+        self.lastDriveSyncAt = Self.loadLastDriveSyncAt()
 
         do {
             if let snapshot = try fileStore.load() {
@@ -107,6 +116,10 @@ public final class NativeAppState: ObservableObject {
 
     public var touchLogCount: Int {
         contactLogs.count + photoLogs.count
+    }
+
+    public var isGoogleDriveConfigured: Bool {
+        driveService.isConfigured
     }
 
     public var todaySchedule: VisitSchedule? {
@@ -547,9 +560,13 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
-    public func exportSnapshotData() throws -> Data {
-        let snapshot = snapshot()
-        let photos = photoLogs.map { log in
+    public func exportSnapshotData(listIds: Set<String>? = nil) throws -> Data {
+        try fileStore.encoder.encode(buildBackup(listIds: listIds))
+    }
+
+    func buildBackup(listIds: Set<String>? = nil) throws -> NativeFullBackup {
+        let snapshot = snapshot(listIds: listIds)
+        let photos = snapshot.photoLogs.map { log in
             NativePhotoBackupItem(
                 id: log.id,
                 fileName: log.fileName,
@@ -558,8 +575,7 @@ public final class NativeAppState: ObservableObject {
                 thumbnailDataBase64: try? fileStore.readPhotoData(fileName: log.thumbnailFileName).base64EncodedString()
             )
         }
-        let backup = NativeFullBackup(schemaVersion: 2, snapshot: snapshot, photos: photos)
-        return try fileStore.encoder.encode(backup)
+        return NativeFullBackup(schemaVersion: 2, snapshot: snapshot, photos: photos)
     }
 
     public func importSnapshot(url: URL) {
@@ -572,17 +588,7 @@ public final class NativeAppState: ObservableObject {
         do {
             let data = try Data(contentsOf: url)
             if let backup = try? fileStore.decoder.decode(NativeFullBackup.self, from: data) {
-                restore(snapshot: backup.snapshot)
-                for photo in backup.photos {
-                    if let imageBase64 = photo.imageDataBase64,
-                       let imageData = Data(base64Encoded: imageBase64) {
-                        try? fileStore.writePhotoData(imageData, fileName: photo.fileName)
-                    }
-                    if let thumbnailBase64 = photo.thumbnailDataBase64,
-                       let thumbnailData = Data(base64Encoded: thumbnailBase64) {
-                        try? fileStore.writePhotoData(thumbnailData, fileName: photo.thumbnailFileName)
-                    }
-                }
+                restore(backup: backup, selectedListIds: nil)
                 persist()
                 storageMessage = "사진을 포함한 전체 백업을 가져왔습니다."
                 return
@@ -597,6 +603,107 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    public func connectGoogleDrive() async {
+        guard isGoogleDriveConfigured else {
+            driveSyncMessage = "Google iOS OAuth Client ID 설정이 필요합니다."
+            return
+        }
+        await runDriveOperation { [self] in
+            let account = try await driveService.connect()
+            driveAccount = account
+            Self.saveDriveAccount(account)
+            driveSyncMessage = "\(account.email) 계정으로 연결했습니다."
+        }
+    }
+
+    public func disconnectGoogleDrive() {
+        driveAccount = nil
+        lastDriveSyncAt = nil
+        cachedRemoteBackup = nil
+        remoteDriveLists = []
+        Self.clearDriveAccount()
+        driveSyncMessage = "이 기기의 Google Drive 연결 정보를 삭제했습니다."
+    }
+
+    public func syncGoogleDriveAll() async {
+        guard canUseDrive() else { return }
+        await runDriveOperation { [self] in
+            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+            let localBackup = try buildBackup()
+            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) {
+                let remoteBackup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+                let merged = mergeBackups(remoteBackup, localBackup)
+                restore(backup: merged, selectedListIds: nil)
+                persist()
+                try await driveService.updateAppDataSyncFile(accessToken: token.accessToken, fileId: remoteFile.id, backup: merged)
+            } else {
+                try await driveService.createAppDataSyncFile(accessToken: token.accessToken, backup: localBackup)
+            }
+            markDriveSyncComplete(message: "Google Drive 동기화를 완료했습니다.")
+        }
+    }
+
+    public func saveAllToGoogleDrive() async {
+        guard canUseDrive() else { return }
+        await runDriveOperation { [self] in
+            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+            let backup = try buildBackup()
+            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) {
+                try await driveService.updateAppDataSyncFile(accessToken: token.accessToken, fileId: remoteFile.id, backup: backup)
+            } else {
+                try await driveService.createAppDataSyncFile(accessToken: token.accessToken, backup: backup)
+            }
+            markDriveSyncComplete(message: "현재 기기 전체 데이터를 Drive에 저장했습니다.")
+        }
+    }
+
+    public func loadRemoteDriveBackup() async {
+        guard canUseDrive() else { return }
+        await runDriveOperation { [self] in
+            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+            guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) else {
+                cachedRemoteBackup = nil
+                remoteDriveLists = []
+                driveSyncMessage = "Google Drive에 동기화 파일이 없습니다."
+                return
+            }
+            let backup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+            cachedRemoteBackup = backup
+            remoteDriveLists = backup.snapshot.customerLists
+            driveSyncMessage = "\(remoteDriveLists.count)개 고객리스트를 Drive에서 확인했습니다."
+        }
+    }
+
+    public func restoreFromGoogleDrive(listIds: Set<String>? = nil) async {
+        guard canUseDrive() else { return }
+        await runDriveOperation { [self] in
+            let backup: NativeFullBackup
+            if let cachedRemoteBackup {
+                backup = cachedRemoteBackup
+            } else {
+                let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+                guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) else {
+                    driveSyncMessage = "Google Drive에 동기화 파일이 없습니다."
+                    return
+                }
+                backup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+            }
+            restore(backup: backup, selectedListIds: listIds)
+            persist()
+            markDriveSyncComplete(message: listIds == nil ? "Drive 전체 데이터를 이 기기에 복원했습니다." : "선택한 고객리스트를 Drive에서 복원했습니다.")
+        }
+    }
+
+    public func createVisibleGoogleDriveBackup(listIds: Set<String>? = nil) async {
+        guard canUseDrive() else { return }
+        await runDriveOperation { [self] in
+            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.fileScopes)
+            let backup = try buildBackup(listIds: listIds)
+            try await driveService.createVisibleBackup(accessToken: token.accessToken, fileName: driveBackupFileName(listIds: listIds), backup: backup)
+            driveSyncMessage = listIds == nil ? "Google Drive에 전체 백업 파일을 만들었습니다." : "Google Drive에 선택 고객리스트 백업 파일을 만들었습니다."
+        }
+    }
+
     private func restore(snapshot: NativeAppSnapshot) {
         customerLists = snapshot.customerLists
         customers = snapshot.customers
@@ -607,6 +714,106 @@ public final class NativeAppState: ObservableObject {
         visitScheduleItems = snapshot.visitScheduleItems
         messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
         selectedListId = snapshot.selectedListId ?? customerLists.first?.id
+    }
+
+    private func restore(backup: NativeFullBackup, selectedListIds: Set<String>?) {
+        guard let selectedListIds, !selectedListIds.isEmpty else {
+            restore(snapshot: backup.snapshot)
+            writePhotoData(from: backup.photos)
+            return
+        }
+
+        let remoteSnapshot = backup.snapshot
+        let targetCustomerIds = Set(remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }.map(\.id))
+        let targetScheduleIds = Set(remoteSnapshot.visitSchedules.filter { selectedListIds.contains($0.customerListId) }.map(\.id))
+
+        customerLists.removeAll { selectedListIds.contains($0.id) }
+        customers.removeAll { selectedListIds.contains($0.customerListId) }
+        visitLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
+        contactLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
+        photoLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
+        visitSchedules.removeAll { selectedListIds.contains($0.customerListId) }
+        visitScheduleItems.removeAll { selectedListIds.contains($0.customerListId) || targetScheduleIds.contains($0.scheduleId) || targetCustomerIds.contains($0.customerId) }
+
+        let restoredLists = remoteSnapshot.customerLists.filter { selectedListIds.contains($0.id) }
+        let restoredCustomers = remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }
+        let restoredCustomerIds = Set(restoredCustomers.map(\.id))
+        let restoredSchedules = remoteSnapshot.visitSchedules.filter { selectedListIds.contains($0.customerListId) }
+        let restoredScheduleIds = Set(restoredSchedules.map(\.id))
+        let restoredPhotoLogs = remoteSnapshot.photoLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
+
+        customerLists.append(contentsOf: restoredLists)
+        customers.append(contentsOf: restoredCustomers)
+        visitLogs.append(contentsOf: remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) })
+        contactLogs.append(contentsOf: remoteSnapshot.contactLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) })
+        photoLogs.append(contentsOf: restoredPhotoLogs)
+        visitSchedules.append(contentsOf: restoredSchedules)
+        visitScheduleItems.append(contentsOf: remoteSnapshot.visitScheduleItems.filter { selectedListIds.contains($0.customerListId) && restoredScheduleIds.contains($0.scheduleId) && restoredCustomerIds.contains($0.customerId) })
+        messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
+        selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
+
+        let photoFileNames = Set(restoredPhotoLogs.flatMap { [$0.fileName, $0.thumbnailFileName] })
+        writePhotoData(from: backup.photos.filter { photoFileNames.contains($0.fileName) || photoFileNames.contains($0.thumbnailFileName) })
+    }
+
+    private func writePhotoData(from photos: [NativePhotoBackupItem]) {
+        for photo in photos {
+            if let imageBase64 = photo.imageDataBase64,
+               let imageData = Data(base64Encoded: imageBase64) {
+                try? fileStore.writePhotoData(imageData, fileName: photo.fileName)
+            }
+            if let thumbnailBase64 = photo.thumbnailDataBase64,
+               let thumbnailData = Data(base64Encoded: thumbnailBase64) {
+                try? fileStore.writePhotoData(thumbnailData, fileName: photo.thumbnailFileName)
+            }
+        }
+    }
+
+    private func canUseDrive() -> Bool {
+        guard isGoogleDriveConfigured else {
+            driveSyncMessage = "Google iOS OAuth Client ID 설정이 필요합니다."
+            return false
+        }
+        guard driveAccount != nil else {
+            driveSyncMessage = "먼저 Google 계정으로 연결하세요."
+            return false
+        }
+        return true
+    }
+
+    private func runDriveOperation(_ operation: @escaping () async throws -> Void) async {
+        guard !driveSyncBusy else { return }
+        driveSyncBusy = true
+        defer { driveSyncBusy = false }
+        do {
+            try await operation()
+        } catch {
+            driveSyncMessage = "Google Drive 작업에 실패했습니다. OAuth 설정과 권한을 확인하세요."
+        }
+    }
+
+    private func markDriveSyncComplete(message: String) {
+        let now = Date()
+        lastDriveSyncAt = now
+        Self.saveLastDriveSyncAt(now)
+        driveSyncMessage = message
+    }
+
+    private func driveBackupFileName(listIds: Set<String>?) -> String {
+        let date = DateFormatter.nativeDriveBackupDate.string(from: Date())
+        guard let listIds, !listIds.isEmpty else {
+            return "소희가간다-전체백업-\(date).json"
+        }
+        if listIds.count == 1,
+           let listName = customerLists.first(where: { listIds.contains($0.id) })?.name {
+            return "소희가간다-\(safeDriveFileName(listName))-백업-\(date).json"
+        }
+        return "소희가간다-\(listIds.count)개리스트-백업-\(date).json"
+    }
+
+    private func safeDriveFileName(_ name: String) -> String {
+        let disallowed = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        return name.components(separatedBy: disallowed).joined(separator: "_")
     }
 
     public func geocodeVisibleCustomers() async {
@@ -689,17 +896,24 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
-    private func snapshot() -> NativeAppSnapshot {
-        NativeAppSnapshot(
-            customerLists: customerLists,
-            customers: customers,
-            visitLogs: visitLogs,
-            contactLogs: contactLogs,
-            photoLogs: photoLogs,
-            visitSchedules: visitSchedules,
-            visitScheduleItems: visitScheduleItems,
+    private func snapshot(listIds: Set<String>? = nil) -> NativeAppSnapshot {
+        let filteredLists = customerLists.filter { listIds?.contains($0.id) ?? true }
+        let filteredListIds = Set(filteredLists.map(\.id))
+        let filteredCustomers = customers.filter { filteredListIds.contains($0.customerListId) }
+        let filteredCustomerIds = Set(filteredCustomers.map(\.id))
+        let filteredSchedules = visitSchedules.filter { filteredListIds.contains($0.customerListId) }
+        let filteredScheduleIds = Set(filteredSchedules.map(\.id))
+
+        return NativeAppSnapshot(
+            customerLists: filteredLists,
+            customers: filteredCustomers,
+            visitLogs: visitLogs.filter { filteredListIds.contains($0.customerListId) && filteredCustomerIds.contains($0.customerId) },
+            contactLogs: contactLogs.filter { filteredListIds.contains($0.customerListId) && filteredCustomerIds.contains($0.customerId) },
+            photoLogs: photoLogs.filter { filteredListIds.contains($0.customerListId) && filteredCustomerIds.contains($0.customerId) },
+            visitSchedules: filteredSchedules,
+            visitScheduleItems: visitScheduleItems.filter { filteredListIds.contains($0.customerListId) && filteredScheduleIds.contains($0.scheduleId) && filteredCustomerIds.contains($0.customerId) },
             messageTemplates: messageTemplates,
-            selectedListId: selectedListId
+            selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
     }
 
@@ -766,6 +980,74 @@ public final class NativeAppState: ObservableObject {
 
     static func todayKey() -> String {
         DateFormatter.nativeDateOnly.string(from: Date())
+    }
+
+    private func mergeBackups(_ remote: NativeFullBackup, _ local: NativeFullBackup) -> NativeFullBackup {
+        let mergedLists = mergeById(remote.snapshot.customerLists, local.snapshot.customerLists) { $0.updatedAt < $1.updatedAt }
+        let mergedCustomers = mergeById(remote.snapshot.customers, local.snapshot.customers) { $0.updatedAt < $1.updatedAt }
+        let mergedVisitLogs = mergeById(remote.snapshot.visitLogs, local.snapshot.visitLogs) { $0.createdAt < $1.createdAt }
+        let mergedContactLogs = mergeById(remote.snapshot.contactLogs, local.snapshot.contactLogs) { $0.createdAt < $1.createdAt }
+        let mergedPhotoLogs = mergeById(remote.snapshot.photoLogs, local.snapshot.photoLogs) { $0.createdAt < $1.createdAt }
+        let mergedSchedules = mergeById(remote.snapshot.visitSchedules, local.snapshot.visitSchedules) { $0.updatedAt < $1.updatedAt }
+        let mergedScheduleItems = mergeById(remote.snapshot.visitScheduleItems, local.snapshot.visitScheduleItems) { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
+        let mergedTemplates = mergeById(remote.snapshot.messageTemplates, local.snapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
+        let snapshot = NativeAppSnapshot(
+            customerLists: mergedLists,
+            customers: mergedCustomers,
+            visitLogs: mergedVisitLogs,
+            contactLogs: mergedContactLogs,
+            photoLogs: mergedPhotoLogs,
+            visitSchedules: mergedSchedules,
+            visitScheduleItems: mergedScheduleItems,
+            messageTemplates: mergedTemplates,
+            selectedListId: local.snapshot.selectedListId ?? remote.snapshot.selectedListId,
+            savedAt: Date()
+        )
+        let mergedPhotos = mergeById(remote.photos, local.photos) { lhs, rhs in
+            (lhs.imageDataBase64 == nil && rhs.imageDataBase64 != nil) || (lhs.thumbnailDataBase64 == nil && rhs.thumbnailDataBase64 != nil)
+        }
+        return NativeFullBackup(schemaVersion: max(remote.schemaVersion, local.schemaVersion), snapshot: snapshot, photos: mergedPhotos)
+    }
+
+    private func mergeById<T: Identifiable>(_ first: [T], _ second: [T], preferSecond: (T, T) -> Bool) -> [T] where T.ID: Hashable {
+        var merged: [T.ID: T] = [:]
+        for item in first {
+            merged[item.id] = item
+        }
+        for item in second {
+            if let existing = merged[item.id] {
+                if preferSecond(existing, item) {
+                    merged[item.id] = item
+                }
+            } else {
+                merged[item.id] = item
+            }
+        }
+        return Array(merged.values)
+    }
+
+    private static func loadDriveAccount() -> GoogleDriveAccount? {
+        guard let data = UserDefaults.standard.data(forKey: "nativeGoogleDriveAccount") else { return nil }
+        return try? JSONDecoder().decode(GoogleDriveAccount.self, from: data)
+    }
+
+    private static func saveDriveAccount(_ account: GoogleDriveAccount) {
+        if let data = try? JSONEncoder().encode(account) {
+            UserDefaults.standard.set(data, forKey: "nativeGoogleDriveAccount")
+        }
+    }
+
+    private static func clearDriveAccount() {
+        UserDefaults.standard.removeObject(forKey: "nativeGoogleDriveAccount")
+        UserDefaults.standard.removeObject(forKey: "nativeGoogleDriveLastSyncAt")
+    }
+
+    private static func loadLastDriveSyncAt() -> Date? {
+        UserDefaults.standard.object(forKey: "nativeGoogleDriveLastSyncAt") as? Date
+    }
+
+    private static func saveLastDriveSyncAt(_ date: Date) {
+        UserDefaults.standard.set(date, forKey: "nativeGoogleDriveLastSyncAt")
     }
 
     static func sampleData() -> (lists: [CustomerList], customers: [Customer], visitLogs: [VisitLog]) {
@@ -865,13 +1147,13 @@ public final class NativeAppState: ObservableObject {
     }
 }
 
-private struct NativeFullBackup: Codable {
+struct NativeFullBackup: Codable {
     var schemaVersion: Int
     var snapshot: NativeAppSnapshot
     var photos: [NativePhotoBackupItem]
 }
 
-private struct NativePhotoBackupItem: Codable {
+struct NativePhotoBackupItem: Codable, Identifiable {
     var id: String
     var fileName: String
     var thumbnailFileName: String
@@ -916,6 +1198,14 @@ private extension DateFormatter {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    static let nativeDriveBackupDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
         return formatter
     }()
 }
