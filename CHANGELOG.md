@@ -4,6 +4,8 @@
 
 ## 2026-07-07
 
+- 네이티브 앱 설정 탭 정리
+  - 기능 없이 설명만 표시하던 `네이티브 앱` 안내 섹션 제거
 - 네이티브 앱 Google OAuth Client ID 주입 자동화 추가
   - 실제 iOS OAuth Client ID를 `Info.plist`에 직접 커밋하지 않고 빌드 시 주입하도록 변경
   - `native/.google-drive-oauth.local.example`과 iPhone 빌드/설치 자동화 스크립트 추가

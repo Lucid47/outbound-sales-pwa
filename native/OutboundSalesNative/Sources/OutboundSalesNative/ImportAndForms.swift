@@ -826,11 +826,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("네이티브 앱") {
-                    Label("고객리스트와 사진 기록은 앱 저장소에 함께 저장합니다.", systemImage: "externaldrive")
-                    Label("Google Drive 동기화는 전체/선택 백업 구조를 사용합니다.", systemImage: "icloud")
-                }
-
                 Section("Google Drive 동기화") {
                     if !state.isGoogleDriveConfigured {
                         Label("Google iOS OAuth Client ID 설정이 필요합니다.", systemImage: "exclamationmark.triangle")
