@@ -33,3 +33,4 @@ tools/customer-list-ocr-cli/test-data/customer/
 # Native app local build output
 native/**/.build/
 native/**/DerivedData/
+native/.google-drive-oauth.local

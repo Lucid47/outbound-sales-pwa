@@ -4,6 +4,10 @@
 
 ## 2026-07-07
 
+- 네이티브 앱 Google OAuth Client ID 주입 자동화 추가
+  - 실제 iOS OAuth Client ID를 `Info.plist`에 직접 커밋하지 않고 빌드 시 주입하도록 변경
+  - `native/.google-drive-oauth.local.example`과 iPhone 빌드/설치 자동화 스크립트 추가
+  - OAuth 설정값이 비어 있거나 빌드 변수 자리표시자인 경우 Google Drive 연결이 비활성화되도록 보강
 - 네이티브 앱 Google Drive 동기화/백업 기능 추가
   - Google Drive appDataFolder에 네이티브 앱 전체 동기화 파일을 저장/복원하는 흐름 구현
   - 고객리스트/고객/히스토리/스케줄/문자 템플릿/사진 기록을 하나의 백업 단위로 묶어 동기화

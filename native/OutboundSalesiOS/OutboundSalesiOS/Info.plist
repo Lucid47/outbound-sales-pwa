@@ -25,16 +25,16 @@
 			<string>Google Drive OAuth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.lucid47.outboundsales</string>
+				<string>$(GOOGLE_DRIVE_REDIRECT_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>GoogleDriveOAuthClientID</key>
-	<string></string>
+	<string>$(GOOGLE_DRIVE_OAUTH_CLIENT_ID)</string>
 	<key>GoogleDriveRedirectScheme</key>
-	<string>com.lucid47.outboundsales</string>
+	<string>$(GOOGLE_DRIVE_REDIRECT_SCHEME)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

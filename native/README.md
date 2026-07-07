@@ -160,7 +160,20 @@ Info.plist: GoogleDriveRedirectScheme
 
 Google Cloud에서는 OAuth Client를 만들 때 application type을 `iOS`로 선택합니다. 웹용 Client ID나 PWA의 `VITE_GOOGLE_CLIENT_ID`를 네이티브 앱에 넣지 않습니다.
 
-현재 네이티브 구현은 Google Sign-In SDK가 아니라 `ASWebAuthenticationSession` + Authorization Code + PKCE 방식입니다. 따라서 client secret은 앱에 넣지 않으며, `GoogleDriveOAuthClientID`에는 iOS Client ID만 넣습니다. URL scheme은 `Info.plist`의 `CFBundleURLTypes`와 `GoogleDriveRedirectScheme`이 서로 같아야 합니다.
+현재 네이티브 구현은 Google Sign-In SDK가 아니라 `ASWebAuthenticationSession` + Authorization Code + PKCE 방식입니다. 따라서 client secret은 앱에 넣지 않으며, `GoogleDriveOAuthClientID`에는 iOS Client ID만 넣습니다. 실제 Client ID는 추적 파일에 직접 적지 않고 `native/.google-drive-oauth.local`에서 빌드 시 주입합니다.
+
+```bash
+cp native/.google-drive-oauth.local.example native/.google-drive-oauth.local
+native/scripts/build-ios-with-google-drive.sh
+```
+
+실제 기기에 바로 설치하려면 연결된 기기 ID를 지정합니다.
+
+```bash
+native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
+```
+
+URL scheme은 `Info.plist`의 `CFBundleURLTypes`와 `GoogleDriveRedirectScheme`이 서로 같아야 합니다.
 
 필요 scope는 아래와 같습니다.
 

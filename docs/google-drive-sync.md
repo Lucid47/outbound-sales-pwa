@@ -73,7 +73,7 @@ Token 저장: access token 장기 저장 안 함
    - Bundle ID: com.lucid47.outboundsales
    - App Store ID: 아직 배포 전이면 비워둠
    - Team ID: App Check을 쓸 때 필요, 1차 구현에서는 선택
-6. 생성된 iOS Client ID를 Xcode Info.plist에 입력
+6. 생성된 iOS Client ID를 로컬 설정 파일에 입력하고 빌드 시 주입
 ```
 
 ```text
@@ -84,7 +84,7 @@ Info.plist 키: GoogleDriveOAuthClientID
 Info.plist 키: GoogleDriveRedirectScheme
 ```
 
-실제 기기 테스트 전에는 Google Cloud에서 발급한 iOS OAuth Client ID를 `Info.plist`의 `GoogleDriveOAuthClientID`에 넣어야 합니다. 이 값이 비어 있으면 앱의 Google Drive 연결 버튼은 동작하지 않아야 합니다.
+실제 기기 테스트 전에는 Google Cloud에서 발급한 iOS OAuth Client ID를 `native/.google-drive-oauth.local`에 넣고 자동화 스크립트로 빌드합니다. 이 값이 비어 있거나 자리표시자이면 앱의 Google Drive 연결 버튼은 동작하지 않아야 합니다.
 
 앱에서 사용하는 권한:
 
@@ -114,13 +114,13 @@ https://www.googleapis.com/auth/drive.file:
 
 ### Info.plist 반영 기준
 
-현재 네이티브 앱은 아래 값을 읽습니다.
+현재 네이티브 앱은 아래 값을 읽습니다. 실제 Client ID는 Git에 커밋하지 않고, 빌드 시 `$(GOOGLE_DRIVE_OAUTH_CLIENT_ID)`에 주입합니다.
 
 ```xml
 <key>GoogleDriveOAuthClientID</key>
-<string>GOOGLE_IOS_OAUTH_CLIENT_ID</string>
+<string>$(GOOGLE_DRIVE_OAUTH_CLIENT_ID)</string>
 <key>GoogleDriveRedirectScheme</key>
-<string>com.lucid47.outboundsales</string>
+<string>$(GOOGLE_DRIVE_REDIRECT_SCHEME)</string>
 ```
 
 그리고 URL scheme에도 같은 scheme이 등록되어 있어야 합니다.
@@ -133,7 +133,7 @@ https://www.googleapis.com/auth/drive.file:
     <string>Google Drive OAuth</string>
     <key>CFBundleURLSchemes</key>
     <array>
-      <string>com.lucid47.outboundsales</string>
+      <string>$(GOOGLE_DRIVE_REDIRECT_SCHEME)</string>
     </array>
   </dict>
 </array>
@@ -144,6 +144,35 @@ Google OAuth 요청에 사용되는 redirect URI는 아래 형태입니다.
 ```text
 com.lucid47.outboundsales:/oauth2redirect
 ```
+
+### 로컬 빌드 자동화
+
+1. 예시 파일을 복사합니다.
+
+```bash
+cp native/.google-drive-oauth.local.example native/.google-drive-oauth.local
+```
+
+2. `native/.google-drive-oauth.local`에 Google Cloud에서 발급한 iOS OAuth Client ID를 넣습니다.
+
+```text
+GOOGLE_DRIVE_OAUTH_CLIENT_ID=발급받은_iOS_Client_ID.apps.googleusercontent.com
+GOOGLE_DRIVE_REDIRECT_SCHEME=com.lucid47.outboundsales
+```
+
+3. 앱을 빌드합니다.
+
+```bash
+native/scripts/build-ios-with-google-drive.sh
+```
+
+4. 연결된 아이폰에 바로 설치하려면 기기 ID를 넣습니다.
+
+```bash
+native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
+```
+
+`native/.google-drive-oauth.local`은 Git 제외 대상입니다. 실제 Client ID를 `Info.plist`에 직접 넣어 커밋하지 않습니다.
 
 주의:
 

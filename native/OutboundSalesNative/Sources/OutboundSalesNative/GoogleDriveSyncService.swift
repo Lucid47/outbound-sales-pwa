@@ -66,14 +66,15 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
     }
 
     private var clientId: String {
-        (Bundle.main.object(forInfoDictionaryKey: "GoogleDriveOAuthClientID") as? String)?
+        let value = (Bundle.main.object(forInfoDictionaryKey: "GoogleDriveOAuthClientID") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return Self.normalizedInfoPlistValue(value)
     }
 
     private var redirectScheme: String {
         if let configured = Bundle.main.object(forInfoDictionaryKey: "GoogleDriveRedirectScheme") as? String,
-           !configured.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return configured.trimmingCharacters(in: .whitespacesAndNewlines)
+           !Self.normalizedInfoPlistValue(configured).isEmpty {
+            return Self.normalizedInfoPlistValue(configured)
         }
         return Bundle.main.bundleIdentifier ?? "com.lucid47.outboundsales"
     }
@@ -322,6 +323,14 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
     private static func codeChallenge(for verifier: String) -> String {
         let digest = SHA256.hash(data: Data(verifier.utf8))
         return Data(digest).base64URLEncodedString()
+    }
+
+    private static func normalizedInfoPlistValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed.hasPrefix("$(") {
+            return ""
+        }
+        return trimmed
     }
 }
 
