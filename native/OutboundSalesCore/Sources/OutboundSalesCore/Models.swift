@@ -74,6 +74,20 @@ public enum VoiceTranscriptionStatus: String, Codable, Sendable {
     case failed
 }
 
+public struct VoiceTranscriptionSegment: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var text: String
+    public var timestamp: TimeInterval
+    public var duration: TimeInterval
+
+    public init(id: String, text: String, timestamp: TimeInterval, duration: TimeInterval) {
+        self.id = id
+        self.text = text
+        self.timestamp = timestamp
+        self.duration = duration
+    }
+}
+
 public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -174,6 +188,7 @@ public struct VisitLog: Identifiable, Codable, Equatable, Sendable {
     public var audioFileName: String?
     public var audioTranscript: String?
     public var audioDuration: TimeInterval?
+    public var audioSegments: [VoiceTranscriptionSegment]?
     public var transcriptionStatus: VoiceTranscriptionStatus?
     public var createdAt: Date
 
@@ -190,6 +205,7 @@ public struct VisitLog: Identifiable, Codable, Equatable, Sendable {
         audioFileName: String? = nil,
         audioTranscript: String? = nil,
         audioDuration: TimeInterval? = nil,
+        audioSegments: [VoiceTranscriptionSegment]? = nil,
         transcriptionStatus: VoiceTranscriptionStatus? = nil,
         createdAt: Date
     ) {
@@ -205,6 +221,7 @@ public struct VisitLog: Identifiable, Codable, Equatable, Sendable {
         self.audioFileName = audioFileName
         self.audioTranscript = audioTranscript
         self.audioDuration = audioDuration
+        self.audioSegments = audioSegments
         self.transcriptionStatus = transcriptionStatus
         self.createdAt = createdAt
     }

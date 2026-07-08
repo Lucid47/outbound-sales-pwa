@@ -517,10 +517,18 @@ public final class NativeAppState: ObservableObject {
         return log
     }
 
-    public func updateVoiceTranscription(logId: String, transcript: String?, status: VoiceTranscriptionStatus) {
+    public func updateVoiceTranscription(
+        logId: String,
+        transcript: String?,
+        status: VoiceTranscriptionStatus,
+        segments: [VoiceTranscriptionSegment]? = nil
+    ) {
         guard let index = visitLogs.firstIndex(where: { $0.id == logId }) else { return }
         visitLogs[index].audioTranscript = transcript?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         visitLogs[index].transcriptionStatus = status
+        if let segments {
+            visitLogs[index].audioSegments = segments
+        }
         persist()
     }
 
