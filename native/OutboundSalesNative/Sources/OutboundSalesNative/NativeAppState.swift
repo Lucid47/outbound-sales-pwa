@@ -214,6 +214,47 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    func importContactCustomers(_ contacts: [ContactImportCustomer], listName: String, sourceFileName: String = "contacts", skipDuplicatePhones: Bool = true) {
+        let now = Date()
+        let resolvedListName = listName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "연락처 가져오기" : listName
+        let list = CustomerList(
+            id: UUID().uuidString,
+            name: resolvedListName,
+            companyName: resolvedListName,
+            sourceFileName: sourceFileName,
+            importedAt: now,
+            createdAt: now,
+            updatedAt: now
+        )
+        let importedCustomers = makeCustomers(from: contacts, customerListId: list.id, now: now, skipDuplicatePhones: skipDuplicatePhones)
+        customerLists.insert(list, at: 0)
+        customers.append(contentsOf: importedCustomers.customers)
+        selectedListId = list.id
+        importMessage = "\(importedCustomers.customers.count)명의 연락처를 가져왔습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
+        persist()
+        Task {
+            await geocodeVisibleCustomers()
+        }
+    }
+
+    func appendContactCustomers(_ contacts: [ContactImportCustomer], to listId: String, sourceFileName: String = "contacts", skipDuplicatePhones: Bool = true) {
+        guard let listIndex = customerLists.firstIndex(where: { $0.id == listId }) else {
+            importMessage = "추가할 고객리스트를 찾지 못했습니다."
+            return
+        }
+
+        let now = Date()
+        let importedCustomers = makeCustomers(from: contacts, customerListId: listId, now: now, skipDuplicatePhones: skipDuplicatePhones)
+        customers.append(contentsOf: importedCustomers.customers)
+        customerLists[listIndex].updatedAt = now
+        selectedListId = listId
+        importMessage = "\(customerLists[listIndex].name)에 \(importedCustomers.customers.count)명의 연락처를 추가했습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
+        persist()
+        Task {
+            await geocodeVisibleCustomers()
+        }
+    }
+
     public func importFile(url: URL, listName: String) {
         let accessGranted = url.startAccessingSecurityScopedResource()
         defer {
@@ -915,6 +956,47 @@ public final class NativeAppState: ObservableObject {
             messageTemplates: messageTemplates,
             selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
+    }
+
+    private func makeCustomers(
+        from importedContacts: [ContactImportCustomer],
+        customerListId: String,
+        now: Date,
+        skipDuplicatePhones: Bool
+    ) -> (customers: [Customer], skippedCount: Int) {
+        var existingPhones = Set(customers.map { ContactExportService.normalizedPhone($0.phoneNumber) }.filter { !$0.isEmpty })
+        var skippedCount = 0
+        var nextCustomers: [Customer] = []
+
+        for imported in importedContacts {
+            let normalizedPhone = ContactExportService.normalizedPhone(imported.phoneNumber)
+            if skipDuplicatePhones, !normalizedPhone.isEmpty, existingPhones.contains(normalizedPhone) {
+                skippedCount += 1
+                continue
+            }
+            if !normalizedPhone.isEmpty {
+                existingPhones.insert(normalizedPhone)
+            }
+            let address = imported.address.trimmingCharacters(in: .whitespacesAndNewlines)
+            nextCustomers.append(
+                Customer(
+                    id: UUID().uuidString,
+                    customerListId: customerListId,
+                    name: imported.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "이름 없음" : imported.name,
+                    phoneNumber: imported.phoneNumber,
+                    address: address,
+                    notes: imported.notes,
+                    region: extractRegion(address),
+                    status: .open,
+                    contactIdentifier: imported.contactIdentifier,
+                    contactRegisteredName: imported.name,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            )
+        }
+
+        return (nextCustomers, skippedCount)
     }
 
     private func contactTitle(_ log: ContactLog) -> String {

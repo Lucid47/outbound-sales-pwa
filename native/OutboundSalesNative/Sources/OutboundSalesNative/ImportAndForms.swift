@@ -2,6 +2,8 @@ import OutboundSalesCore
 import SwiftUI
 import UniformTypeIdentifiers
 #if os(iOS)
+import Contacts
+import ContactsUI
 import PhotosUI
 import UIKit
 #endif
@@ -12,6 +14,7 @@ struct ImportView: View {
     @State private var showingCreateList = false
     @State private var showingAddCustomer = false
     @State private var importDraft: ImportDraft?
+    @State private var contactImportDraft: ContactImportDraft?
     @State private var pastedCSV = """
     이름,전화번호,주소,메모
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
@@ -19,6 +22,8 @@ struct ImportView: View {
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
+    @State private var showingContactPicker = false
+    @State private var showingContactGroupPicker = false
     #else
     @State private var showingImageImporter = false
     #endif
@@ -51,6 +56,26 @@ struct ImportView: View {
                     }
                     .disabled(state.selectedListId == nil)
                 }
+
+                #if os(iOS)
+                Section("연락처에서 가져오기") {
+                    Button {
+                        showingContactPicker = true
+                    } label: {
+                        Label("개별 연락처 선택", systemImage: "person.crop.circle.badge.plus")
+                    }
+
+                    Button {
+                        showingContactGroupPicker = true
+                    } label: {
+                        Label("연락처 그룹 선택", systemImage: "person.3.sequence")
+                    }
+
+                    Text("선택한 연락처를 새 고객리스트로 저장하거나 기존 리스트에 추가합니다.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                #endif
 
                 Section("사진에서 가져오기") {
                     #if os(iOS)
@@ -131,10 +156,27 @@ struct ImportView: View {
                 ImportMappingSheet(draft: draft)
                     .environmentObject(state)
             }
+            .sheet(item: $contactImportDraft) { draft in
+                ContactImportSaveSheet(draft: draft)
+                    .environmentObject(state)
+            }
             #if os(iOS)
             .onChange(of: selectedPhotoItem) { _, item in
                 guard let item else { return }
                 Task { await recognizePhotoItem(item) }
+            }
+            .sheet(isPresented: $showingContactPicker) {
+                ContactPickerSheet { contacts in
+                    showingContactPicker = false
+                    presentContactImport(contacts, sourceTitle: "연락처 선택", defaultListName: "연락처 가져오기")
+                } onCancel: {
+                    showingContactPicker = false
+                }
+            }
+            .sheet(isPresented: $showingContactGroupPicker) {
+                ContactGroupImportSheet { draft in
+                    contactImportDraft = draft
+                }
             }
             .sheet(isPresented: $showingCamera) {
                 CameraCaptureView { url in
@@ -190,6 +232,18 @@ struct ImportView: View {
             sourceFileName: sourceFileName,
             rawText: text,
             defaultListName: defaultListName(from: sourceFileName)
+        )
+    }
+
+    private func presentContactImport(_ contacts: [ContactImportCustomer], sourceTitle: String, defaultListName: String) {
+        guard !contacts.isEmpty else {
+            state.importMessage = "선택한 연락처에서 가져올 이름 또는 전화번호를 찾지 못했습니다."
+            return
+        }
+        contactImportDraft = ContactImportDraft(
+            sourceTitle: sourceTitle,
+            defaultListName: defaultListName,
+            contacts: contacts
         )
     }
 
