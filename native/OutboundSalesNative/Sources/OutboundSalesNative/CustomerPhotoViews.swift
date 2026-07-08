@@ -13,6 +13,9 @@ struct CustomerPhotoCaptureSheet: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
     let customer: Customer
+    var title = "사진 메모"
+    var visitKind: VisitLogKind?
+    var onSaved: (() -> Void)?
     @State private var caption = ""
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -24,7 +27,7 @@ struct CustomerPhotoCaptureSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("사진 기록") {
+                Section("사진 메모") {
                     LabeledContent("고객", value: customer.name.isEmpty ? "이름 없음" : customer.name)
                     TextField("간단 메모", text: $caption, axis: .vertical)
                 }
@@ -65,7 +68,7 @@ struct CustomerPhotoCaptureSheet: View {
                     }
                 }
             }
-            .navigationTitle("사진 기록")
+            .navigationTitle(title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("닫기") { dismiss() }
@@ -104,6 +107,10 @@ struct CustomerPhotoCaptureSheet: View {
         do {
             let data = try Data(contentsOf: url)
             state.addPhoto(customer: customer, imageData: data, source: source, caption: caption)
+            if visitKind == .photoMemo {
+                onSaved?()
+                dismiss()
+            }
             caption = ""
         } catch {
             state.actionMessage = "사진을 읽지 못했습니다."
@@ -118,6 +125,10 @@ struct CustomerPhotoCaptureSheet: View {
                 return
             }
             state.addPhoto(customer: customer, imageData: data, source: .photoLibrary, caption: caption)
+            if visitKind == .photoMemo {
+                onSaved?()
+                dismiss()
+            }
             caption = ""
             selectedPhotoItem = nil
         } catch {
@@ -198,6 +209,7 @@ struct CustomerPhotoGrid: View {
 
 struct CustomerHistoryEntryRow: View {
     @EnvironmentObject private var state: NativeAppState
+    @Environment(\.openURL) private var openURL
     let entry: CustomerHistoryEntry
     @State private var selectedPhotoLog: CustomerPhotoLog?
 
@@ -229,6 +241,31 @@ struct CustomerHistoryEntryRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("사진 보기")
+                } else if let mapSnapshotFileName = entry.visitLog?.mapSnapshotFileName {
+                    Button {
+                        openVisitLocation()
+                    } label: {
+                        AsyncImage(url: state.assetURL(fileName: mapSnapshotFileName)) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            case .failure:
+                                Image(systemName: "map")
+                                    .foregroundStyle(.secondary)
+                            case .empty:
+                                ProgressView()
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                        .frame(width: 72, height: 72)
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("지도 열기")
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -248,6 +285,14 @@ struct CustomerHistoryEntryRow: View {
             CustomerPhotoViewer(photoLogs: [log], initialPhotoId: log.id)
                 .environmentObject(state)
         }
+    }
+
+    private func openVisitLocation() {
+        guard let address = entry.visitLog?.locationAddress?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "http://maps.apple.com/?q=\(address)") else {
+            return
+        }
+        openURL(url)
     }
 }
 

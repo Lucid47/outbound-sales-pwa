@@ -10,6 +10,7 @@ struct CustomerActionCard: View {
     @State private var showingEdit = false
     @State private var showingMessageSheet = false
     @State private var showingPhotoSheet = false
+    @State private var showingVisitSheet = false
 
     private let primaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     private let secondaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
@@ -89,16 +90,8 @@ struct CustomerActionCard: View {
                     state.addToTodaySchedule(customer)
                 }
 
-                actionButton(
-                    customer.status == .done ? "완료취소" : "완료",
-                    customer.status == .done ? "arrow.uturn.backward" : "checkmark",
-                    color: customer.status == .done ? Color(red: 0.45, green: 0.49, blue: 0.55) : Color(red: 0.12, green: 0.74, blue: 0.32)
-                ) {
-                    if customer.status == .done {
-                        state.toggleDone(customer)
-                    } else {
-                        state.completeVisit(customer: customer)
-                    }
+                actionButton("방문", "mappin.and.ellipse", color: Color(red: 0.12, green: 0.74, blue: 0.32)) {
+                    showingVisitSheet = true
                 }
             }
         }
@@ -118,7 +111,11 @@ struct CustomerActionCard: View {
                 .environmentObject(state)
         }
         .sheet(isPresented: $showingPhotoSheet) {
-            CustomerPhotoCaptureSheet(customer: customer)
+            CustomerPhotoCaptureSheet(customer: customer, title: "사진 메모")
+                .environmentObject(state)
+        }
+        .sheet(isPresented: $showingVisitSheet) {
+            CustomerVisitPromptSheet(customer: customer)
                 .environmentObject(state)
         }
     }

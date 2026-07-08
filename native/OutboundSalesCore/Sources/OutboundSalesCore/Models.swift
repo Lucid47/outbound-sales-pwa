@@ -59,6 +59,21 @@ public enum CustomerPhotoSyncStatus: String, Codable, Sendable {
     case failed
 }
 
+public enum VisitLogKind: String, Codable, Sendable {
+    case completed
+    case quickLocation
+    case textMemo
+    case photoMemo
+    case voiceMemo
+}
+
+public enum VoiceTranscriptionStatus: String, Codable, Sendable {
+    case pending
+    case transcribing
+    case completed
+    case failed
+}
+
 public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var name: String
@@ -153,15 +168,44 @@ public struct VisitLog: Identifiable, Codable, Equatable, Sendable {
     public var visitedAt: Date
     public var result: String
     public var memo: String?
+    public var kind: VisitLogKind?
+    public var locationAddress: String?
+    public var mapSnapshotFileName: String?
+    public var audioFileName: String?
+    public var audioTranscript: String?
+    public var audioDuration: TimeInterval?
+    public var transcriptionStatus: VoiceTranscriptionStatus?
     public var createdAt: Date
 
-    public init(id: String, customerListId: String, customerId: String, visitedAt: Date, result: String, memo: String? = nil, createdAt: Date) {
+    public init(
+        id: String,
+        customerListId: String,
+        customerId: String,
+        visitedAt: Date,
+        result: String,
+        memo: String? = nil,
+        kind: VisitLogKind? = nil,
+        locationAddress: String? = nil,
+        mapSnapshotFileName: String? = nil,
+        audioFileName: String? = nil,
+        audioTranscript: String? = nil,
+        audioDuration: TimeInterval? = nil,
+        transcriptionStatus: VoiceTranscriptionStatus? = nil,
+        createdAt: Date
+    ) {
         self.id = id
         self.customerListId = customerListId
         self.customerId = customerId
         self.visitedAt = visitedAt
         self.result = result
         self.memo = memo
+        self.kind = kind
+        self.locationAddress = locationAddress
+        self.mapSnapshotFileName = mapSnapshotFileName
+        self.audioFileName = audioFileName
+        self.audioTranscript = audioTranscript
+        self.audioDuration = audioDuration
+        self.transcriptionStatus = transcriptionStatus
         self.createdAt = createdAt
     }
 }

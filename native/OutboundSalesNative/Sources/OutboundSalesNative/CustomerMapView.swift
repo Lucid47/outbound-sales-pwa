@@ -197,6 +197,7 @@ private struct MapCustomerPanel: View {
     let onNote: () -> Void
     let onHistory: () -> Void
     @State private var showingMessageSheet = false
+    @State private var showingVisitSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -230,12 +231,8 @@ private struct MapCustomerPanel: View {
                     .disabled(customer.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && customer.latitude == nil)
                 panelButton("메모", "square.and.pencil") { onNote() }
                 panelButton("이력", "calendar.badge.clock") { onHistory() }
-                panelButton(customer.status == .done ? "완료취소" : "완료", "checkmark") {
-                    if customer.status == .done {
-                        state.toggleDone(customer)
-                    } else {
-                        state.completeVisit(customer: customer)
-                    }
+                panelButton("방문", "mappin.and.ellipse") {
+                    showingVisitSheet = true
                 }
             }
 
@@ -253,6 +250,10 @@ private struct MapCustomerPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .sheet(isPresented: $showingMessageSheet) {
             MessageComposerSheet(customer: customer)
+                .environmentObject(state)
+        }
+        .sheet(isPresented: $showingVisitSheet) {
+            CustomerVisitPromptSheet(customer: customer)
                 .environmentObject(state)
         }
     }

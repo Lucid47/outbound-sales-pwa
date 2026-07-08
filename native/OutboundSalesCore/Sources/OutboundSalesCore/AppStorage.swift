@@ -102,17 +102,29 @@ public struct NativeAppFileStore: Sendable {
     }
 
     public func photoURL(fileName: String) -> URL {
-        fileURL.deletingLastPathComponent().appendingPathComponent(fileName)
+        assetURL(fileName: fileName)
     }
 
     public func writePhotoData(_ data: Data, fileName: String) throws {
-        let url = photoURL(fileName: fileName)
+        try writeAssetData(data, fileName: fileName)
+    }
+
+    public func readPhotoData(fileName: String) throws -> Data {
+        try readAssetData(fileName: fileName)
+    }
+
+    public func assetURL(fileName: String) -> URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent(fileName)
+    }
+
+    public func writeAssetData(_ data: Data, fileName: String) throws {
+        let url = assetURL(fileName: fileName)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: [.atomic])
     }
 
-    public func readPhotoData(fileName: String) throws -> Data {
-        try Data(contentsOf: photoURL(fileName: fileName))
+    public func readAssetData(fileName: String) throws -> Data {
+        try Data(contentsOf: assetURL(fileName: fileName))
     }
 
     public static func defaultFileURL() -> URL {

@@ -15,6 +15,8 @@ struct CustomerDetailView: View {
     @State private var showingEdit = false
     @State private var showingMessageSheet = false
     @State private var showingPhotoSheet = false
+    @State private var showingVoiceSheet = false
+    @State private var showingVisitSheet = false
     @State private var noteText = ""
     @State private var visitMemo = ""
 
@@ -68,17 +70,29 @@ struct CustomerDetailView: View {
                         Button {
                             showingPhotoSheet = true
                         } label: {
-                            Label("사진 기록", systemImage: "camera.fill")
+                            Label("사진 메모", systemImage: "camera.fill")
+                        }
+
+                        Button {
+                            showingVoiceSheet = true
+                        } label: {
+                            Label("음성 메모", systemImage: "mic.fill")
+                        }
+
+                        Button {
+                            showingVisitSheet = true
+                        } label: {
+                            Label("방문", systemImage: "mappin.and.ellipse")
                         }
                     }
 
-                    Section("사진 기록") {
+                    Section("사진 메모") {
                         let photos = state.photos(for: customer)
                         if photos.isEmpty {
                             Button {
                                 showingPhotoSheet = true
                             } label: {
-                                Label("첫 사진 추가", systemImage: "camera.fill")
+                                Label("첫 사진 메모 추가", systemImage: "camera.fill")
                             }
                         } else {
                             CustomerPhotoGrid(photoLogs: photos)
@@ -86,7 +100,7 @@ struct CustomerDetailView: View {
                             Button {
                                 showingPhotoSheet = true
                             } label: {
-                                Label("사진 추가", systemImage: "plus")
+                                Label("사진 메모 추가", systemImage: "plus")
                             }
                         }
                     }
@@ -111,7 +125,7 @@ struct CustomerDetailView: View {
                         }
                     }
 
-                    Section("메모/방문 기록") {
+                    Section("메모/방문 히스토리") {
                         TextField("메모", text: $noteText, axis: .vertical)
                         Button {
                             state.addNote(customer: customer, memo: noteText)
@@ -123,10 +137,10 @@ struct CustomerDetailView: View {
 
                         TextField("방문 메모", text: $visitMemo, axis: .vertical)
                         Button {
-                            state.completeVisit(customer: customer, memo: visitMemo)
+                            _ = state.addVisitHistory(customer: customer, kind: .textMemo, memo: visitMemo)
                             visitMemo = ""
                         } label: {
-                            Label("방문 완료 기록", systemImage: "checkmark.seal")
+                            Label("텍스트 메모 저장", systemImage: "text.bubble")
                         }
                     }
 
@@ -160,7 +174,19 @@ struct CustomerDetailView: View {
                         .environmentObject(state)
                 }
                 .sheet(isPresented: $showingPhotoSheet) {
-                    CustomerPhotoCaptureSheet(customer: customer)
+                    CustomerPhotoCaptureSheet(customer: customer, title: "사진 메모")
+                        .environmentObject(state)
+                }
+                .sheet(isPresented: $showingVoiceSheet) {
+                    #if os(iOS)
+                    VisitVoiceMemoSheet(customer: customer) {}
+                        .environmentObject(state)
+                    #else
+                    Text("음성 메모는 iPhone에서 사용할 수 있습니다.")
+                    #endif
+                }
+                .sheet(isPresented: $showingVisitSheet) {
+                    CustomerVisitPromptSheet(customer: customer)
                         .environmentObject(state)
                 }
             } else {

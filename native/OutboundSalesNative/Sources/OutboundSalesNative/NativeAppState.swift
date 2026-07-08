@@ -14,6 +14,7 @@ public struct CustomerHistoryEntry: Identifiable, Equatable {
     public var title: String
     public var detail: String
     public var photoLog: CustomerPhotoLog?
+    public var visitLog: VisitLog?
 }
 
 @MainActor
@@ -385,6 +386,10 @@ public final class NativeAppState: ObservableObject {
         fileStore.photoURL(fileName: thumbnail ? log.thumbnailFileName : log.fileName)
     }
 
+    public func assetURL(fileName: String) -> URL {
+        fileStore.assetURL(fileName: fileName)
+    }
+
     public func addPhoto(customer: Customer, imageData: Data, source: CustomerPhotoSource, caption: String = "") {
         let now = Date()
         let photoId = UUID().uuidString
@@ -411,10 +416,10 @@ public final class NativeAppState: ObservableObject {
                 ),
                 at: 0
             )
-            actionMessage = "사진 기록을 저장했습니다."
+            actionMessage = "사진 메모를 저장했습니다."
             persist()
         } catch {
-            actionMessage = "사진 기록 저장에 실패했습니다."
+            actionMessage = "사진 메모 저장에 실패했습니다."
         }
     }
 
@@ -443,6 +448,7 @@ public final class NativeAppState: ObservableObject {
                 visitedAt: now,
                 result: "completed",
                 memo: memo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : memo,
+                kind: .completed,
                 createdAt: now
             ),
             at: 0
@@ -451,6 +457,70 @@ public final class NativeAppState: ObservableObject {
             customers[index].status = .done
             customers[index].updatedAt = now
         }
+        persist()
+    }
+
+    public func addVisitHistory(
+        customer: Customer,
+        kind: VisitLogKind,
+        memo: String = "",
+        locationAddress: String? = nil,
+        mapSnapshotData: Data? = nil,
+        audioData: Data? = nil,
+        audioDuration: TimeInterval? = nil
+    ) -> VisitLog? {
+        let now = Date()
+        let logId = UUID().uuidString
+        let basePath = "visit-history/\(customer.customerListId)/\(customer.id)"
+        var mapSnapshotFileName: String?
+        var audioFileName: String?
+
+        do {
+            if let mapSnapshotData {
+                let fileName = "\(basePath)/\(logId)-map.jpg"
+                try fileStore.writeAssetData(mapSnapshotData, fileName: fileName)
+                mapSnapshotFileName = fileName
+            }
+            if let audioData {
+                let fileName = "\(basePath)/\(logId)-voice.m4a"
+                try fileStore.writeAssetData(audioData, fileName: fileName)
+                audioFileName = fileName
+            }
+        } catch {
+            actionMessage = "방문 기록 파일 저장에 실패했습니다."
+            return nil
+        }
+
+        let trimmedMemo = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+        let log = VisitLog(
+            id: logId,
+            customerListId: customer.customerListId,
+            customerId: customer.id,
+            visitedAt: now,
+            result: kind.rawValue,
+            memo: trimmedMemo.isEmpty ? nil : trimmedMemo,
+            kind: kind,
+            locationAddress: locationAddress?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            mapSnapshotFileName: mapSnapshotFileName,
+            audioFileName: audioFileName,
+            audioDuration: audioDuration,
+            transcriptionStatus: audioFileName == nil ? nil : .pending,
+            createdAt: now
+        )
+        visitLogs.insert(log, at: 0)
+        actionMessage = "방문 히스토리를 저장했습니다."
+        persist()
+
+        if audioFileName != nil {
+            transcribeVoiceMemoIfNeeded(logId: logId)
+        }
+        return log
+    }
+
+    public func updateVoiceTranscription(logId: String, transcript: String?, status: VoiceTranscriptionStatus) {
+        guard let index = visitLogs.firstIndex(where: { $0.id == logId }) else { return }
+        visitLogs[index].audioTranscript = transcript?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        visitLogs[index].transcriptionStatus = status
         persist()
     }
 
@@ -515,8 +585,9 @@ public final class NativeAppState: ObservableObject {
                 CustomerHistoryEntry(
                     id: "visit-\($0.id)",
                     at: $0.visitedAt,
-                    title: "방문 완료",
-                    detail: $0.memo ?? "방문 기록"
+                    title: visitTitle($0),
+                    detail: visitDetail($0),
+                    visitLog: $0
                 )
             }
         let photos = photoLogs
@@ -525,7 +596,7 @@ public final class NativeAppState: ObservableObject {
                 CustomerHistoryEntry(
                     id: "photo-\($0.id)",
                     at: $0.createdAt,
-                    title: "사진 기록",
+                    title: "사진 메모",
                     detail: $0.caption ?? photoSourceText($0.source),
                     photoLog: $0
                 )
@@ -616,7 +687,17 @@ public final class NativeAppState: ObservableObject {
                 thumbnailDataBase64: try? fileStore.readPhotoData(fileName: log.thumbnailFileName).base64EncodedString()
             )
         }
-        return NativeFullBackup(schemaVersion: 2, snapshot: snapshot, photos: photos)
+        let visitAssets = snapshot.visitLogs.compactMap { log -> NativeAssetBackupItem? in
+            guard log.mapSnapshotFileName != nil || log.audioFileName != nil else { return nil }
+            return NativeAssetBackupItem(
+                id: log.id,
+                mapSnapshotFileName: log.mapSnapshotFileName,
+                mapSnapshotDataBase64: log.mapSnapshotFileName.flatMap { try? fileStore.readAssetData(fileName: $0).base64EncodedString() },
+                audioFileName: log.audioFileName,
+                audioDataBase64: log.audioFileName.flatMap { try? fileStore.readAssetData(fileName: $0).base64EncodedString() }
+            )
+        }
+        return NativeFullBackup(schemaVersion: 3, snapshot: snapshot, photos: photos, visitAssets: visitAssets)
     }
 
     public func importSnapshot(url: URL) {
@@ -761,6 +842,7 @@ public final class NativeAppState: ObservableObject {
         guard let selectedListIds, !selectedListIds.isEmpty else {
             restore(snapshot: backup.snapshot)
             writePhotoData(from: backup.photos)
+            writeVisitAssetData(from: backup.visitAssets)
             return
         }
 
@@ -793,8 +875,14 @@ public final class NativeAppState: ObservableObject {
         messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
 
+        let restoredVisitLogs = remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
         let photoFileNames = Set(restoredPhotoLogs.flatMap { [$0.fileName, $0.thumbnailFileName] })
+        let visitFileNames = Set(restoredVisitLogs.flatMap { [$0.mapSnapshotFileName, $0.audioFileName].compactMap { $0 } })
         writePhotoData(from: backup.photos.filter { photoFileNames.contains($0.fileName) || photoFileNames.contains($0.thumbnailFileName) })
+        writeVisitAssetData(from: backup.visitAssets.filter { asset in
+            asset.mapSnapshotFileName.map { visitFileNames.contains($0) } ?? false ||
+            asset.audioFileName.map { visitFileNames.contains($0) } ?? false
+        })
     }
 
     private func writePhotoData(from photos: [NativePhotoBackupItem]) {
@@ -806,6 +894,21 @@ public final class NativeAppState: ObservableObject {
             if let thumbnailBase64 = photo.thumbnailDataBase64,
                let thumbnailData = Data(base64Encoded: thumbnailBase64) {
                 try? fileStore.writePhotoData(thumbnailData, fileName: photo.thumbnailFileName)
+            }
+        }
+    }
+
+    private func writeVisitAssetData(from assets: [NativeAssetBackupItem]) {
+        for asset in assets {
+            if let fileName = asset.mapSnapshotFileName,
+               let base64 = asset.mapSnapshotDataBase64,
+               let data = Data(base64Encoded: base64) {
+                try? fileStore.writeAssetData(data, fileName: fileName)
+            }
+            if let fileName = asset.audioFileName,
+               let base64 = asset.audioDataBase64,
+               let data = Data(base64Encoded: base64) {
+                try? fileStore.writeAssetData(data, fileName: fileName)
             }
         }
     }
@@ -1033,6 +1136,54 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    private func visitTitle(_ log: VisitLog) -> String {
+        switch log.kind {
+        case .quickLocation:
+            return "방문"
+        case .textMemo:
+            return "텍스트 메모"
+        case .photoMemo:
+            return "사진 메모"
+        case .voiceMemo:
+            return "음성 메모"
+        case .completed:
+            return "방문 완료"
+        case .none:
+            return log.result == "completed" ? "방문 완료" : "방문"
+        }
+    }
+
+    private func visitDetail(_ log: VisitLog) -> String {
+        var parts: [String] = []
+        if let memo = log.memo, !memo.isEmpty {
+            parts.append(memo)
+        }
+        if let locationAddress = log.locationAddress, !locationAddress.isEmpty {
+            parts.append(locationAddress)
+        }
+        if log.kind == .voiceMemo {
+            if let transcript = log.audioTranscript, !transcript.isEmpty {
+                parts.append(transcript)
+            } else if let status = log.transcriptionStatus {
+                parts.append(voiceTranscriptionText(status))
+            }
+        }
+        return parts.isEmpty ? "방문 기록" : parts.joined(separator: " · ")
+    }
+
+    private func voiceTranscriptionText(_ status: VoiceTranscriptionStatus) -> String {
+        switch status {
+        case .pending:
+            return "전사 대기중"
+        case .transcribing:
+            return "전사중"
+        case .completed:
+            return "전사 완료"
+        case .failed:
+            return "전사 실패"
+        }
+    }
+
     private func geocodeCustomer(at index: Int) async -> Bool {
         for query in geocodeQueries(for: customers[index].address) {
             do {
@@ -1088,7 +1239,10 @@ public final class NativeAppState: ObservableObject {
         let mergedPhotos = mergeById(remote.photos, local.photos) { lhs, rhs in
             (lhs.imageDataBase64 == nil && rhs.imageDataBase64 != nil) || (lhs.thumbnailDataBase64 == nil && rhs.thumbnailDataBase64 != nil)
         }
-        return NativeFullBackup(schemaVersion: max(remote.schemaVersion, local.schemaVersion), snapshot: snapshot, photos: mergedPhotos)
+        let mergedVisitAssets = mergeById(remote.visitAssets, local.visitAssets) { lhs, rhs in
+            (lhs.mapSnapshotDataBase64 == nil && rhs.mapSnapshotDataBase64 != nil) || (lhs.audioDataBase64 == nil && rhs.audioDataBase64 != nil)
+        }
+        return NativeFullBackup(schemaVersion: max(remote.schemaVersion, local.schemaVersion), snapshot: snapshot, photos: mergedPhotos, visitAssets: mergedVisitAssets)
     }
 
     private func mergeById<T: Identifiable>(_ first: [T], _ second: [T], preferSecond: (T, T) -> Bool) -> [T] where T.ID: Hashable {
@@ -1233,6 +1387,22 @@ struct NativeFullBackup: Codable {
     var schemaVersion: Int
     var snapshot: NativeAppSnapshot
     var photos: [NativePhotoBackupItem]
+    var visitAssets: [NativeAssetBackupItem] = []
+
+    init(schemaVersion: Int, snapshot: NativeAppSnapshot, photos: [NativePhotoBackupItem], visitAssets: [NativeAssetBackupItem] = []) {
+        self.schemaVersion = schemaVersion
+        self.snapshot = snapshot
+        self.photos = photos
+        self.visitAssets = visitAssets
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        snapshot = try container.decode(NativeAppSnapshot.self, forKey: .snapshot)
+        photos = try container.decodeIfPresent([NativePhotoBackupItem].self, forKey: .photos) ?? []
+        visitAssets = try container.decodeIfPresent([NativeAssetBackupItem].self, forKey: .visitAssets) ?? []
+    }
 }
 
 struct NativePhotoBackupItem: Codable, Identifiable {
@@ -1241,6 +1411,20 @@ struct NativePhotoBackupItem: Codable, Identifiable {
     var thumbnailFileName: String
     var imageDataBase64: String?
     var thumbnailDataBase64: String?
+}
+
+struct NativeAssetBackupItem: Codable, Identifiable {
+    var id: String
+    var mapSnapshotFileName: String?
+    var mapSnapshotDataBase64: String?
+    var audioFileName: String?
+    var audioDataBase64: String?
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }
 
 #if os(iOS)

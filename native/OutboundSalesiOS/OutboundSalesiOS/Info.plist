@@ -41,8 +41,14 @@
 	<string>고객리스트 문서를 촬영해 OCR로 가져오기 위해 카메라를 사용합니다.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>연락처에서 고객을 가져오거나 고객을 연락처 그룹으로 일괄 등록하기 위해 연락처 접근 권한이 필요합니다.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>방문 히스토리에 현재 위치의 주소와 지도 메모를 남기기 위해 위치 권한이 필요합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>고객 방문 음성 메모를 녹음하기 위해 마이크를 사용합니다.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>촬영한 고객리스트 사진을 OCR로 가져오기 위해 사진 보관함을 사용합니다.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>음성 메모를 iPhone에서 텍스트로 전사하기 위해 음성 인식 권한이 필요합니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
