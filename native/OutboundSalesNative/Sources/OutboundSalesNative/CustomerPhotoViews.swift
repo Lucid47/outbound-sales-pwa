@@ -16,7 +16,6 @@ struct CustomerPhotoCaptureSheet: View {
     var title = "사진 메모"
     var visitKind: VisitLogKind?
     var onSaved: (() -> Void)?
-    @State private var caption = ""
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
@@ -29,7 +28,6 @@ struct CustomerPhotoCaptureSheet: View {
             Form {
                 Section("사진 메모") {
                     LabeledContent("고객", value: customer.name.isEmpty ? "이름 없음" : customer.name)
-                    TextField("간단 메모", text: $caption, axis: .vertical)
                 }
 
                 Section("사진 추가") {
@@ -62,7 +60,7 @@ struct CustomerPhotoCaptureSheet: View {
 
                 let photos = state.photos(for: customer)
                 if !photos.isEmpty {
-                    Section("최근 사진") {
+                    Section("최근 사진 메모") {
                         CustomerPhotoGrid(photoLogs: photos, maxCount: 6)
                             .environmentObject(state)
                     }
@@ -106,12 +104,11 @@ struct CustomerPhotoCaptureSheet: View {
         }
         do {
             let data = try Data(contentsOf: url)
-            state.addPhoto(customer: customer, imageData: data, source: source, caption: caption)
+            state.addPhoto(customer: customer, imageData: data, source: source)
             if visitKind == .photoMemo {
                 onSaved?()
                 dismiss()
             }
-            caption = ""
         } catch {
             state.actionMessage = "사진을 읽지 못했습니다."
         }
@@ -124,12 +121,11 @@ struct CustomerPhotoCaptureSheet: View {
                 state.actionMessage = "사진을 읽지 못했습니다."
                 return
             }
-            state.addPhoto(customer: customer, imageData: data, source: .photoLibrary, caption: caption)
+            state.addPhoto(customer: customer, imageData: data, source: .photoLibrary)
             if visitKind == .photoMemo {
                 onSaved?()
                 dismiss()
             }
-            caption = ""
             selectedPhotoItem = nil
         } catch {
             state.actionMessage = "사진을 읽지 못했습니다."

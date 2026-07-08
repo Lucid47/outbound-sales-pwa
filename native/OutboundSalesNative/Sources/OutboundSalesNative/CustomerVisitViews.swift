@@ -143,6 +143,225 @@ struct VisitTextMemoSheet: View {
     }
 }
 
+enum VisitMemoPreviewKind {
+    case text
+    case voice
+}
+
+struct VisitMemoPreviewRow: View {
+    let log: VisitLog
+    let kind: VisitMemoPreviewKind
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: iconName)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(iconColor)
+                .frame(width: 34, height: 34)
+                .background(iconColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(previewText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(log.visitedAt, format: .dateTime.year().month().day().hour().minute())
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if kind == .voice {
+                Text(transcriptionStatusText)
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.secondary.opacity(0.12))
+                    .clipShape(Capsule())
+                    .foregroundStyle(.secondary)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var iconName: String {
+        kind == .voice ? "waveform" : "text.bubble"
+    }
+
+    private var iconColor: Color {
+        kind == .voice ? .purple : .blue
+    }
+
+    private var previewText: String {
+        switch kind {
+        case .text:
+            return log.memo?.nilIfEmpty ?? "텍스트 메모"
+        case .voice:
+            return log.audioTranscript?.nilIfEmpty ?? transcriptionStatusText
+        }
+    }
+
+    private var transcriptionStatusText: String {
+        switch log.transcriptionStatus {
+        case .pending:
+            return "전사 대기중"
+        case .transcribing:
+            return "전사중"
+        case .completed:
+            return "전사 완료"
+        case .failed:
+            return "전사 실패"
+        case .none:
+            return "음성"
+        }
+    }
+}
+
+struct TextMemoDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let log: VisitLog
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("기록") {
+                    Text(log.memo?.nilIfEmpty ?? "내용 없음")
+                        .font(.body)
+                        .textSelection(.enabled)
+                    LabeledContent("기록 시간", value: log.visitedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+            .navigationTitle("텍스트 메모")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("닫기") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+#if os(iOS)
+struct VoiceMemoDetailSheet: View {
+    @EnvironmentObject private var state: NativeAppState
+    @Environment(\.dismiss) private var dismiss
+    let log: VisitLog
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var isPlaying = false
+    @State private var message = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("음성") {
+                    Button {
+                        togglePlayback()
+                    } label: {
+                        Label(isPlaying ? "일시정지" : "재생", systemImage: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.headline.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .center)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(log.audioFileName == nil)
+
+                    if let duration = log.audioDuration {
+                        LabeledContent("녹음 시간", value: Self.durationText(duration))
+                    }
+                    LabeledContent("기록 시간", value: log.visitedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+
+                Section("전사") {
+                    Text(log.audioTranscript?.nilIfEmpty ?? transcriptionStatusText)
+                        .textSelection(.enabled)
+                        .foregroundStyle(log.audioTranscript == nil ? .secondary : .primary)
+                }
+
+                if !message.isEmpty {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("음성 메모")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("닫기") {
+                        stopPlayback()
+                        dismiss()
+                    }
+                }
+            }
+            .onDisappear {
+                stopPlayback()
+            }
+        }
+    }
+
+    private var transcriptionStatusText: String {
+        switch log.transcriptionStatus {
+        case .pending:
+            return "전사 대기중입니다."
+        case .transcribing:
+            return "전사중입니다."
+        case .completed:
+            return "전사된 내용이 없습니다."
+        case .failed:
+            return "전사에 실패했습니다. 음성은 재생할 수 있습니다."
+        case .none:
+            return "전사 정보가 없습니다."
+        }
+    }
+
+    private func togglePlayback() {
+        if isPlaying {
+            audioPlayer?.pause()
+            isPlaying = false
+            return
+        }
+
+        do {
+            if audioPlayer == nil {
+                guard let fileName = log.audioFileName else { return }
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playback, mode: .spokenAudio)
+                try session.setActive(true)
+                audioPlayer = try AVAudioPlayer(contentsOf: state.assetURL(fileName: fileName))
+                audioPlayer?.prepareToPlay()
+            }
+            audioPlayer?.play()
+            isPlaying = true
+        } catch {
+            message = "음성 메모를 재생하지 못했습니다."
+            isPlaying = false
+        }
+    }
+
+    private func stopPlayback() {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        isPlaying = false
+    }
+
+    private static func durationText(_ duration: TimeInterval) -> String {
+        let seconds = Int(duration.rounded())
+        return "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+}
+#else
+struct VoiceMemoDetailSheet: View {
+    let log: VisitLog
+
+    var body: some View {
+        Text(log.audioTranscript ?? "음성 메모는 iPhone에서 재생할 수 있습니다.")
+    }
+}
+#endif
+
 #if os(iOS)
 struct VisitVoiceMemoSheet: View {
     @EnvironmentObject private var state: NativeAppState
@@ -150,7 +369,6 @@ struct VisitVoiceMemoSheet: View {
     let customer: Customer
     let onSaved: () -> Void
     @StateObject private var recorder = VoiceMemoRecorder()
-    @State private var memo = ""
     @State private var message = ""
 
     var body: some View {
@@ -162,7 +380,6 @@ struct VisitVoiceMemoSheet: View {
                     if recorder.duration > 0 {
                         LabeledContent("녹음 시간", value: Self.durationText(recorder.duration))
                     }
-                    TextField("간단 메모", text: $memo, axis: .vertical)
                 }
 
                 Section {
@@ -170,11 +387,16 @@ struct VisitVoiceMemoSheet: View {
                         Task { await toggleRecording() }
                     } label: {
                         Label(recorder.isRecording ? "녹음 중지" : "녹음 시작", systemImage: recorder.isRecording ? "stop.circle.fill" : "mic.circle.fill")
+                            .font(.headline.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .center)
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Button("저장") {
+                    Button {
                         saveVoiceMemo()
+                    } label: {
+                        Label("저장", systemImage: "tray.and.arrow.down.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
                     }
                     .disabled(recorder.isRecording || recorder.recordedURL == nil)
                 }
@@ -217,7 +439,6 @@ struct VisitVoiceMemoSheet: View {
             _ = state.addVisitHistory(
                 customer: customer,
                 kind: .voiceMemo,
-                memo: memo,
                 audioData: data,
                 audioDuration: recorder.duration
             )
@@ -295,6 +516,12 @@ private enum VoiceMemoError: Error {
     case permissionDenied
 }
 #endif
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
 
 @MainActor
 final class VisitLocationService: NSObject, CLLocationManagerDelegate {

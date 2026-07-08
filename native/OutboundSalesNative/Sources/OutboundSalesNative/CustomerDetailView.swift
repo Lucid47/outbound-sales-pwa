@@ -16,9 +16,10 @@ struct CustomerDetailView: View {
     @State private var showingMessageSheet = false
     @State private var showingPhotoSheet = false
     @State private var showingVoiceSheet = false
+    @State private var showingTextMemoSheet = false
     @State private var showingVisitSheet = false
-    @State private var noteText = ""
-    @State private var visitMemo = ""
+    @State private var selectedTextMemo: VisitLog?
+    @State private var selectedVoiceMemo: VisitLog?
 
     private var customer: Customer? {
         state.customers.first { $0.id == customerId }
@@ -42,7 +43,7 @@ struct CustomerDetailView: View {
                         }
                     }
 
-                    Section("빠른 실행") {
+                    Section("고객 터치") {
                         Button {
                             state.recordContact(customer: customer, type: .call)
                             if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
@@ -80,6 +81,12 @@ struct CustomerDetailView: View {
                         }
 
                         Button {
+                            showingTextMemoSheet = true
+                        } label: {
+                            Label("텍스트 메모", systemImage: "text.bubble")
+                        }
+
+                        Button {
                             showingVisitSheet = true
                         } label: {
                             Label("방문", systemImage: "mappin.and.ellipse")
@@ -105,6 +112,56 @@ struct CustomerDetailView: View {
                         }
                     }
 
+                    Section("음성 메모") {
+                        let logs = voiceMemoLogs(for: customer)
+                        if logs.isEmpty {
+                            Button {
+                                showingVoiceSheet = true
+                            } label: {
+                                Label("첫 음성 메모 추가", systemImage: "mic.fill")
+                            }
+                        } else {
+                            ForEach(logs.prefix(6)) { log in
+                                Button {
+                                    selectedVoiceMemo = log
+                                } label: {
+                                    VisitMemoPreviewRow(log: log, kind: .voice)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Button {
+                                showingVoiceSheet = true
+                            } label: {
+                                Label("음성 메모 추가", systemImage: "plus")
+                            }
+                        }
+                    }
+
+                    Section("텍스트 메모") {
+                        let logs = textMemoLogs(for: customer)
+                        if logs.isEmpty {
+                            Button {
+                                showingTextMemoSheet = true
+                            } label: {
+                                Label("첫 텍스트 메모 추가", systemImage: "text.bubble")
+                            }
+                        } else {
+                            ForEach(logs.prefix(6)) { log in
+                                Button {
+                                    selectedTextMemo = log
+                                } label: {
+                                    VisitMemoPreviewRow(log: log, kind: .text)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Button {
+                                showingTextMemoSheet = true
+                            } label: {
+                                Label("텍스트 메모 추가", systemImage: "plus")
+                            }
+                        }
+                    }
+
                     Section("상태와 스케줄") {
                         Button {
                             state.toggleDone(customer)
@@ -122,25 +179,6 @@ struct CustomerDetailView: View {
                             state.removeFromTodaySchedule(customer)
                         } label: {
                             Label("오늘 스케줄에서 제거", systemImage: "calendar.badge.minus")
-                        }
-                    }
-
-                    Section("메모/방문 히스토리") {
-                        TextField("메모", text: $noteText, axis: .vertical)
-                        Button {
-                            state.addNote(customer: customer, memo: noteText)
-                            noteText = ""
-                        } label: {
-                            Label("메모 저장", systemImage: "square.and.pencil")
-                        }
-                        .disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        TextField("방문 메모", text: $visitMemo, axis: .vertical)
-                        Button {
-                            _ = state.addVisitHistory(customer: customer, kind: .textMemo, memo: visitMemo)
-                            visitMemo = ""
-                        } label: {
-                            Label("텍스트 메모 저장", systemImage: "text.bubble")
                         }
                     }
 
@@ -189,10 +227,33 @@ struct CustomerDetailView: View {
                     CustomerVisitPromptSheet(customer: customer)
                         .environmentObject(state)
                 }
+                .sheet(isPresented: $showingTextMemoSheet) {
+                    VisitTextMemoSheet(customer: customer) {}
+                        .environmentObject(state)
+                }
+                .sheet(item: $selectedTextMemo) { log in
+                    TextMemoDetailSheet(log: log)
+                }
+                .sheet(item: $selectedVoiceMemo) { log in
+                    VoiceMemoDetailSheet(log: log)
+                        .environmentObject(state)
+                }
             } else {
                 ContentUnavailableView("고객을 찾을 수 없습니다.", systemImage: "person.crop.circle.badge.questionmark")
             }
         }
+    }
+
+    private func textMemoLogs(for customer: Customer) -> [VisitLog] {
+        state.visitLogs
+            .filter { $0.customerId == customer.id && $0.kind == .textMemo }
+            .sorted { $0.visitedAt > $1.visitedAt }
+    }
+
+    private func voiceMemoLogs(for customer: Customer) -> [VisitLog] {
+        state.visitLogs
+            .filter { $0.customerId == customer.id && $0.kind == .voiceMemo }
+            .sorted { $0.visitedAt > $1.visitedAt }
     }
 
     private func openDirections(_ customer: Customer) {

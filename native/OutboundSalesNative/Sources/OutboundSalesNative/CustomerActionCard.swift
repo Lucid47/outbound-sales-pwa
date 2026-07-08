@@ -7,10 +7,10 @@ struct CustomerActionCard: View {
     @Environment(\.openURL) private var openURL
     let customer: Customer
     let compact: Bool
-    @State private var showingEdit = false
     @State private var showingMessageSheet = false
     @State private var showingPhotoSheet = false
     @State private var showingVisitSheet = false
+    @State private var showingVoiceSheet = false
 
     private let primaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     private let secondaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
@@ -78,11 +78,11 @@ struct CustomerActionCard: View {
             }
 
             LazyVGrid(columns: secondaryColumns, spacing: 8) {
-                actionButton("수정", "pencil", color: Color(red: 0.40, green: 0.46, blue: 0.56)) {
-                    showingEdit = true
+                actionButton("음성 메모", "mic.fill", color: Color(red: 0.40, green: 0.46, blue: 0.56)) {
+                    showingVoiceSheet = true
                 }
 
-                actionButton("사진", "camera.fill", color: Color(red: 0.44, green: 0.35, blue: 0.82)) {
+                actionButton("사진 메모", "camera.fill", color: Color(red: 0.44, green: 0.35, blue: 0.82)) {
                     showingPhotoSheet = true
                 }
 
@@ -102,10 +102,6 @@ struct CustomerActionCard: View {
                 .stroke(AppPalette.hairline, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .sheet(isPresented: $showingEdit) {
-            EditCustomerView(customer: customer)
-                .environmentObject(state)
-        }
         .sheet(isPresented: $showingMessageSheet) {
             MessageComposerSheet(customer: customer)
                 .environmentObject(state)
@@ -117,6 +113,14 @@ struct CustomerActionCard: View {
         .sheet(isPresented: $showingVisitSheet) {
             CustomerVisitPromptSheet(customer: customer)
                 .environmentObject(state)
+        }
+        .sheet(isPresented: $showingVoiceSheet) {
+            #if os(iOS)
+            VisitVoiceMemoSheet(customer: customer) {}
+                .environmentObject(state)
+            #else
+            Text("음성 메모는 iPhone에서 사용할 수 있습니다.")
+            #endif
         }
     }
 
