@@ -698,6 +698,7 @@ struct CreateListView: View {
 struct LogsView: View {
     @EnvironmentObject private var state: NativeAppState
     @State private var selectedHistoryCustomer: Customer?
+    @State private var selectedStatusFilter: HistoryStatusFilter = .all
     @State private var isDateFilterEnabled = false
     @State private var startDate = Calendar.current.date(
         byAdding: .day,
@@ -708,11 +709,46 @@ struct LogsView: View {
 
     private var historyPreviews: [CustomerHistoryPreview] {
         guard !isDateFilterEnabled || dateRange != nil else { return [] }
-        return state.visibleCustomers.compactMap { customer in
+        return statusFilteredCustomers.compactMap { customer in
             let logs = filteredLogs(for: customer)
-            guard let latest = logs.first else { return nil }
+            guard !isDateFilterEnabled || !logs.isEmpty else { return nil }
+            let latest = logs.first
             return CustomerHistoryPreview(customer: customer, latest: latest, count: logs.count)
         }
+    }
+
+    private var statusFilteredCustomers: [Customer] {
+        state.visibleCustomers.filter { customer in
+            switch selectedStatusFilter {
+            case .all:
+                return true
+            case .touched:
+                return hasTouchHistory(customer)
+            case .visited:
+                return hasVisitHistory(customer)
+            case .done:
+                return customer.status == .done
+            case .open:
+                return customer.status != .done
+            }
+        }
+    }
+
+    private var visibleCustomerIds: Set<String> {
+        Set(state.visibleCustomers.map(\.id))
+    }
+
+    private var touchedCustomerCount: Int {
+        let ids = Set(
+            state.contactLogs.map(\.customerId) +
+            state.photoLogs.map(\.customerId) +
+            state.visitLogs.map(\.customerId)
+        )
+        return ids.intersection(visibleCustomerIds).count
+    }
+
+    private var visitedCustomerCount: Int {
+        Set(state.visitLogs.map(\.customerId)).intersection(visibleCustomerIds).count
     }
 
     private var dateRange: ClosedRange<Date>? {
@@ -729,7 +765,8 @@ struct LogsView: View {
     }
 
     private var historySectionTitle: String {
-        isDateFilterEnabled ? "기간 내 고객별 히스토리" : "전체 고객별 히스토리"
+        let periodText = isDateFilterEnabled ? "기간 내 " : ""
+        return "\(periodText)\(selectedStatusFilter.title) 고객별 히스토리"
     }
 
     private func filteredLogs(for customer: Customer) -> [CustomerHistoryEntry] {
@@ -739,15 +776,33 @@ struct LogsView: View {
         return logs.filter { dateRange.contains($0.at) }
     }
 
+    private func hasTouchHistory(_ customer: Customer) -> Bool {
+        if isDateFilterEnabled, let dateRange {
+            return state.historyEntries(for: customer).contains { dateRange.contains($0.at) }
+        }
+        return !state.historyEntries(for: customer).isEmpty
+    }
+
+    private func hasVisitHistory(_ customer: Customer) -> Bool {
+        state.visitLogs.contains { log in
+            guard log.customerId == customer.id else { return false }
+            guard isDateFilterEnabled, let dateRange else { return true }
+            return dateRange.contains(log.visitedAt)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section("누적 상태") {
-                    LabeledContent("전체 고객", value: "\(state.visibleCustomers.count)")
-                    LabeledContent("터치 기록", value: "\(state.touchLogCount)")
-                    LabeledContent("방문 기록", value: "\(state.visitLogs.count)")
-                    LabeledContent("완료 고객", value: "\(state.doneCustomerCount)")
-                    LabeledContent("미완료 고객", value: "\(state.openCustomerCount)")
+                    historyFilterRow(.all, count: state.visibleCustomers.count)
+                    historyFilterRow(.touched, count: touchedCustomerCount)
+                    historyFilterRow(.visited, count: visitedCustomerCount)
+                    historyFilterRow(.done, count: state.doneCustomerCount)
+                    historyFilterRow(.open, count: state.openCustomerCount)
+                    Text("터치 고객은 전화, 문자, 길찾기, 메모, 사진, 완료 처리 등 고객별 이력이 하나라도 있는 고객입니다. 방문 고객은 방문 완료 기록이 있는 고객입니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("조회 기간") {
@@ -795,9 +850,15 @@ struct LogsView: View {
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
-                                        Text("\(preview.latest.title) · \(preview.latest.at, format: .dateTime.month().day().hour().minute())")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        if let latest = preview.latest {
+                                            Text("\(latest.title) · \(latest.at, format: .dateTime.month().day().hour().minute())")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("아직 이력 없음")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 4) {
@@ -828,15 +889,62 @@ struct LogsView: View {
         }
     }
 
+    private func historyFilterRow(_ filter: HistoryStatusFilter, count: Int) -> some View {
+        Button {
+            selectedStatusFilter = filter
+        } label: {
+            HStack {
+                Label(filter.title, systemImage: filter.systemImage)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(count)명")
+                    .foregroundStyle(.secondary)
+                if selectedStatusFilter == filter {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.blue)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func progressColor(for customer: Customer) -> Color {
         if customer.status == .done { return .green }
         return state.historyEntries(for: customer).isEmpty ? .secondary : .orange
     }
 }
 
+private enum HistoryStatusFilter: String, CaseIterable {
+    case all
+    case touched
+    case visited
+    case done
+    case open
+
+    var title: String {
+        switch self {
+        case .all: return "전체 고객"
+        case .touched: return "터치 고객"
+        case .visited: return "방문 고객"
+        case .done: return "완료 고객"
+        case .open: return "미완료 고객"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: return "person.3"
+        case .touched: return "hand.tap"
+        case .visited: return "mappin.and.ellipse"
+        case .done: return "checkmark.circle"
+        case .open: return "circle"
+        }
+    }
+}
+
 private struct CustomerHistoryPreview: Identifiable {
     let customer: Customer
-    let latest: CustomerHistoryEntry
+    let latest: CustomerHistoryEntry?
     let count: Int
 
     var id: String { customer.id }
