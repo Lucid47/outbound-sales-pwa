@@ -151,95 +151,123 @@ struct CustomersView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ActiveListPanel()
-                        .environmentObject(state)
-
-                    if !state.geocodeMessage.isEmpty {
-                        Label(state.geocodeMessage, systemImage: "mappin.and.ellipse")
-                            .font(.footnote)
-                            .foregroundStyle(AppPalette.textSecondary)
-                    }
-
-                    NavigationLink {
-                        CustomerMapView()
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ActiveListPanel()
                             .environmentObject(state)
-                    } label: {
-                        HStack {
-                            Label("고객 위치 지도", systemImage: "map")
-                                .foregroundStyle(AppPalette.textPrimary)
-                            Spacer()
-                            Text("표시 가능 \(state.visibleCustomers.filter { $0.latitude != nil && $0.longitude != nil }.count)/\(state.visibleCustomers.count)명")
-                                .font(.caption)
-                                .foregroundStyle(AppPalette.textSecondary)
-                        }
-                        .padding(12)
-                        .background(AppPalette.cardBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
 
-                    Picker("필터", selection: $filterMode) {
-                        ForEach(CustomerFilterMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    Picker("표시 방식", selection: $displayMode) {
-                        ForEach(CustomerDisplayMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("고객 목록")
-                                .font(.headline)
-                                .foregroundStyle(AppPalette.textPrimary)
-                            Spacer()
-                            Text("\(filteredCustomers.count)명")
-                                .font(.subheadline)
+                        if !state.geocodeMessage.isEmpty {
+                            Label(state.geocodeMessage, systemImage: "mappin.and.ellipse")
+                                .font(.footnote)
                                 .foregroundStyle(AppPalette.textSecondary)
                         }
 
-                        if filteredCustomers.isEmpty {
-                            VStack(spacing: 8) {
-                                Image(systemName: "person.3")
-                                    .font(.largeTitle)
-                                    .foregroundStyle(AppPalette.textSecondary)
-                                Text("고객 없음")
-                                    .font(.headline)
+                        NavigationLink {
+                            CustomerMapView()
+                                .environmentObject(state)
+                        } label: {
+                            HStack {
+                                Label("고객 위치 지도", systemImage: "map")
                                     .foregroundStyle(AppPalette.textPrimary)
-                                Text("가져오기 탭에서 고객을 추가하세요.")
-                                    .font(.subheadline)
+                                Spacer()
+                                Text("표시 가능 \(state.visibleCustomers.filter { $0.latitude != nil && $0.longitude != nil }.count)/\(state.visibleCustomers.count)명")
+                                    .font(.caption)
                                     .foregroundStyle(AppPalette.textSecondary)
                             }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 28)
-                        } else {
-                            ForEach(filteredCustomers) { customer in
-                                if displayMode == .cards {
-                                    CustomerActionCard(customer: customer, compact: false)
-                                        .environmentObject(state)
-                                } else {
-                                    CustomerCompactRow(customer: customer)
-                                        .environmentObject(state)
-                                }
+                            .padding(12)
+                            .background(AppPalette.cardBackground)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+
+                        Picker("필터", selection: $filterMode) {
+                            ForEach(CustomerFilterMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
                             }
                         }
+                        .pickerStyle(.segmented)
+
+                        Picker("표시 방식", selection: $displayMode) {
+                            ForEach(CustomerDisplayMode.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        customerListSection(width: proxy.size.width)
                     }
-                    .padding(12)
-                    .background(AppPalette.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(maxWidth: .infinity)
+                    .padding(responsivePagePadding(for: proxy.size.width))
                 }
-                .padding(12)
+                .background(AppPalette.pageBackground)
             }
-            .background(AppPalette.pageBackground)
             .searchable(text: $state.searchText, prompt: "이름, 전화번호, 주소 검색")
             .navigationTitle("고객")
+        }
+    }
+
+    private func customerListSection(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("고객 목록")
+                    .font(.headline)
+                    .foregroundStyle(AppPalette.textPrimary)
+                Spacer()
+                Text("\(filteredCustomers.count)명")
+                    .font(.subheadline)
+                    .foregroundStyle(AppPalette.textSecondary)
+            }
+
+            if filteredCustomers.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.3")
+                        .font(.largeTitle)
+                        .foregroundStyle(AppPalette.textSecondary)
+                    Text("고객 없음")
+                        .font(.headline)
+                        .foregroundStyle(AppPalette.textPrimary)
+                    Text("가져오기 탭에서 고객을 추가하세요.")
+                        .font(.subheadline)
+                        .foregroundStyle(AppPalette.textSecondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+            } else {
+                LazyVGrid(columns: customerGridColumns(width: width), spacing: displayMode == .cards ? 12 : 6) {
+                    ForEach(filteredCustomers) { customer in
+                        if displayMode == .cards {
+                            CustomerActionCard(customer: customer, compact: false)
+                                .environmentObject(state)
+                        } else {
+                            CustomerCompactRow(customer: customer)
+                                .environmentObject(state)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(AppPalette.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func customerGridColumns(width: CGFloat) -> [GridItem] {
+        let horizontalPadding = responsivePagePadding(for: width) * 2 + 24
+        let availableWidth = max(320, width - horizontalPadding)
+        let minimum: CGFloat = displayMode == .cards ? 340 : 420
+        let columnCount = max(1, min(displayMode == .cards ? 4 : 3, Int(availableWidth / minimum)))
+        return Array(repeating: GridItem(.flexible(), spacing: displayMode == .cards ? 12 : 10, alignment: .top), count: columnCount)
+    }
+
+    private func responsivePagePadding(for width: CGFloat) -> CGFloat {
+        switch width {
+        case 0..<700:
+            return 12
+        case 700..<1100:
+            return 18
+        default:
+            return 24
         }
     }
 }
