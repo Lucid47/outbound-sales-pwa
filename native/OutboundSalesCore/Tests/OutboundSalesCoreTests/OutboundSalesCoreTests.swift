@@ -85,6 +85,78 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(candidates.contains("대한민국 경기도 하남시 미사강변한강로 30"))
     }
 
+    func testBuildsGroupSmsRepeatedTestRecipientsForTwoPhones() throws {
+        var id = 0
+        let recipients = try GroupSmsBuilder.buildTestRecipients(
+            input: GroupSmsTestInput(
+                phoneNumbers: ["010-1111-2222", "010-3333-4444"],
+                repeatsPerPhone: 2,
+                messageTemplate: "테스트 {순번}/{전체}",
+                delaySettings: GroupSmsDelaySettings(mode: .off)
+            ),
+            idGenerator: {
+                id += 1
+                return "recipient-\(id)"
+            }
+        )
+
+        XCTAssertEqual(recipients.count, 4)
+        XCTAssertEqual(recipients.map(\.phoneNumber), ["01011112222", "01033334444", "01011112222", "01033334444"])
+        XCTAssertEqual(recipients.map(\.messageBody), ["테스트 001/4", "테스트 002/4", "테스트 003/4", "테스트 004/4"])
+        XCTAssertEqual(recipients.map(\.plannedDelaySeconds), [0, 0, 0, 0])
+    }
+
+    func testBuildsGroupSmsRandomAndBatchDelays() throws {
+        let recipients = try GroupSmsBuilder.buildTestRecipients(
+            input: GroupSmsTestInput(
+                phoneNumbers: ["01011112222"],
+                repeatsPerPhone: 4,
+                messageTemplate: "테스트 {순번}",
+                delaySettings: GroupSmsDelaySettings(
+                    mode: .random,
+                    minDelaySeconds: 1,
+                    maxDelaySeconds: 3,
+                    batchRestEnabled: true,
+                    batchSize: 3,
+                    batchMinRestSeconds: 30,
+                    batchMaxRestSeconds: 60
+                )
+            ),
+            idGenerator: { "id" },
+            randomInt: { range in range.lowerBound }
+        )
+
+        XCTAssertEqual(recipients.map(\.plannedDelaySeconds), [0, 1, 1, 30])
+    }
+
+    func testEncodesGroupSmsPayloadAndShortcutURL() throws {
+        let recipients = [
+            GroupSmsRecipient(
+                id: "recipient-1",
+                displayName: "테스트 1",
+                phoneNumber: "01011112222",
+                messageBody: "본문",
+                orderIndex: 0,
+                plannedDelaySeconds: 0
+            )
+        ]
+        let payload = GroupSmsBuilder.makePayload(
+            campaignId: "campaign-1",
+            campaignTitle: "반복 테스트",
+            recipients: recipients,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let json = try GroupSmsBuilder.encodePayload(payload)
+        XCTAssertTrue(json.contains("\"campaignId\":\"campaign-1\""))
+        XCTAssertTrue(json.contains("\"phoneNumber\":\"01011112222\""))
+
+        let url = try XCTUnwrap(GroupSmsBuilder.shortcutsRunURL(campaignId: "campaign-1"))
+        XCTAssertEqual(url.scheme, "shortcuts")
+        XCTAssertTrue(url.absoluteString.contains("SoheeGroupSMS"))
+        XCTAssertTrue(url.absoluteString.contains("campaign-1"))
+    }
+
     func testBuildsDenseOCRRowsWithoutMergingAdjacentCustomers() {
         let boxes = [
             ocrBox("김소현", x: 0.10, y: 0.10),

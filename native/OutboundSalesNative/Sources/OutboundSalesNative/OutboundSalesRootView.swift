@@ -29,6 +29,9 @@ public struct OutboundSalesRootView: View {
                 .environmentObject(state)
                 .tabItem { Label("기록", systemImage: "clock.arrow.circlepath") }
 
+            GroupSmsTestView()
+                .tabItem { Label("단체문자", systemImage: "message.badge") }
+
             SettingsView()
                 .environmentObject(state)
                 .tabItem { Label("설정", systemImage: "gearshape") }
