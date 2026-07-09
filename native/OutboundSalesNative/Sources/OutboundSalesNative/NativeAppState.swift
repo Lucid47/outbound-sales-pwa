@@ -416,7 +416,7 @@ public final class NativeAppState: ObservableObject {
                 ),
                 at: 0
             )
-            actionMessage = "사진 메모를 저장했습니다."
+            actionMessage = "\(photoSourceText(source)) 사진 메모를 저장했습니다."
             persist()
         } catch {
             actionMessage = "사진 메모 저장에 실패했습니다."
@@ -1138,9 +1138,9 @@ public final class NativeAppState: ObservableObject {
         case .camera:
             return "카메라 촬영"
         case .photoLibrary:
-            return "사진앱 선택"
+            return "사진앱에서 불러옴"
         case .file:
-            return "이미지 파일"
+            return "이미지 파일에서 불러옴"
         }
     }
 

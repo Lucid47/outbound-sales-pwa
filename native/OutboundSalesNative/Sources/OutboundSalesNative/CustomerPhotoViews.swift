@@ -19,6 +19,7 @@ struct CustomerPhotoCaptureSheet: View {
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCamera = false
+    @State private var isImportingPhoto = false
     #else
     @State private var showingImageImporter = false
     #endif
@@ -28,9 +29,12 @@ struct CustomerPhotoCaptureSheet: View {
             Form {
                 Section("사진 메모") {
                     LabeledContent("고객", value: customer.name.isEmpty ? "이름 없음" : customer.name)
+                    Text("촬영하거나 사진앱에서 불러온 사진은 고객의 사진 메모로 앱 저장소에 별도 저장됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Section("사진 추가") {
+                Section {
                     #if os(iOS)
                     Button {
                         if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -41,21 +45,35 @@ struct CustomerPhotoCaptureSheet: View {
                     } label: {
                         Label("카메라로 촬영", systemImage: "camera.fill")
                     }
+                    .disabled(isImportingPhoto)
 
                     PhotosPicker(
                         selection: $selectedPhotoItem,
                         matching: .images,
                         photoLibrary: .shared()
                     ) {
-                        Label("사진앱에서 선택", systemImage: "photo.on.rectangle")
+                        Label("사진앱에서 불러오기", systemImage: "photo.on.rectangle")
+                    }
+                    .disabled(isImportingPhoto)
+
+                    if isImportingPhoto {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("사진을 앱 저장소에 복사하는 중...")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     #else
                     Button {
                         showingImageImporter = true
                     } label: {
-                        Label("이미지 파일 선택", systemImage: "photo.on.rectangle")
+                        Label("이미지 파일 불러오기", systemImage: "photo.on.rectangle")
                     }
                     #endif
+                } header: {
+                    Text("사진 추가")
+                } footer: {
+                    Text("메신저나 문자로 받은 사진은 먼저 사진앱에 저장한 뒤 여기에서 불러오면 됩니다. 불러온 뒤에는 원본 사진앱과 별개로 앱 내부에 보관됩니다.")
                 }
 
                 let photos = state.photos(for: customer)
@@ -116,6 +134,11 @@ struct CustomerPhotoCaptureSheet: View {
 
     #if os(iOS)
     private func addPhotoItem(_ item: PhotosPickerItem) async {
+        isImportingPhoto = true
+        defer {
+            selectedPhotoItem = nil
+            isImportingPhoto = false
+        }
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 state.actionMessage = "사진을 읽지 못했습니다."
@@ -126,7 +149,6 @@ struct CustomerPhotoCaptureSheet: View {
                 onSaved?()
                 dismiss()
             }
-            selectedPhotoItem = nil
         } catch {
             state.actionMessage = "사진을 읽지 못했습니다."
         }
