@@ -155,6 +155,9 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(url.scheme, "shortcuts")
         XCTAssertTrue(url.absoluteString.contains("SoheeGroupSMS"))
         XCTAssertTrue(url.absoluteString.contains("campaign-1"))
+
+        let openURL = try XCTUnwrap(GroupSmsBuilder.shortcutsOpenURL())
+        XCTAssertEqual(openURL.absoluteString, "shortcuts://open-shortcut?name=SoheeGroupSMS")
     }
 
     func testBuildsDenseOCRRowsWithoutMergingAdjacentCustomers() {

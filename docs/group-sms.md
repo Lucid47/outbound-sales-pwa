@@ -379,11 +379,19 @@ unknown
 
 - 단체문자 기능 첫 실행 시 전용 단축어 설치 안내
 - 단축어 이름: `SoheeGroupSMS`
+- 단축어 버전: 앱이 기대하는 payload 형식과 맞는지 확인하기 위해 버전 표시
 - 사용자가 단축어를 삭제했을 수 있으므로 오류 발생 시 재설치 안내
 - 단축어 권한 승인 안내
   - 메시지 보내기 권한
   - 클립보드 또는 입력값 사용
   - 앱 복귀 URL 열기
+- 앱 내부 UI
+  - `iCloud 단축어 공유 링크` 입력/저장
+  - `단축어 설치하기`: 공유 링크를 열어 Shortcuts 앱의 추가 화면으로 이동
+  - `설치 확인 테스트`: `shortcuts://open-shortcut?name=SoheeGroupSMS`를 열어 단축어 존재 여부를 사용자가 확인
+  - `단축어 구성 안내 복사`: 앱이 기대하는 단축어 액션 순서를 클립보드에 복사
+  - `payload만 클립보드에 복사`: 실제 발송 전 단축어 입력값만 검증
+  - `단축어로 테스트 발송`: payload 복사 후 `shortcuts://x-callback-url/run-shortcut` 실행
 
 단축어 배포 방식 후보:
 
@@ -391,7 +399,27 @@ unknown
 2. 앱 내 단계별 생성 가이드 제공
 3. 장기적으로 `.shortcut` 파일 또는 웹 가이드 페이지 제공 검토
 
-1차 MVP에서는 설치 링크와 스크린샷 가이드를 제공하는 방식이 가장 빠르다.
+1차 MVP에서는 설치 링크와 앱 내부 텍스트 가이드를 제공하는 방식이 가장 빠르다. 앱이 사용자 동의 없이 단축어를 자동 설치하는 것은 iOS 정책상 불가능하므로, 사용자가 Shortcuts 앱에서 `단축어 추가`를 직접 눌러야 한다.
+
+### `SoheeGroupSMS` 단축어 구성 초안
+
+앱이 클립보드에 저장하는 payload는 JSON 텍스트다. 단축어는 다음 순서로 구성한다.
+
+1. 클립보드 가져오기
+2. 클립보드 텍스트를 JSON/딕셔너리로 변환
+3. `recipients` 배열 가져오기
+4. 각 recipient 반복
+5. `phoneNumber`, `messageBody`, `plannedDelaySeconds` 추출
+6. 메시지 보내기 액션 실행
+   - 수신자는 항상 `phoneNumber` 1명만 지정
+   - 여러 수신자를 한 메시지에 넣지 않음
+7. `plannedDelaySeconds`가 0보다 크면 대기
+8. 완료 시 `com.lucid47.outboundsales:/group-sms/complete?campaignId=...` 열기
+
+주의:
+
+- 실제 메시지 자동 발송 가능 여부와 확인 단계는 iOS/Shortcuts 버전 및 사용자의 단축어 권한 설정에 영향을 받는다.
+- 단축어 설치 확인은 앱이 Shortcuts 열기를 요청하는 방식이므로, 실제 설치 여부는 사용자가 열린 화면을 보고 확인해야 한다.
 
 ## 현재 앱과의 통합 포인트
 

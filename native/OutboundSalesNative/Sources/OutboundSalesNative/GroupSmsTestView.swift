@@ -8,6 +8,9 @@ import AppKit
 
 struct GroupSmsTestView: View {
     @Environment(\.openURL) private var openURL
+    @AppStorage("groupSmsShortcutInstallURL") private var shortcutInstallURLText = ""
+    @AppStorage("groupSmsShortcutVerified") private var shortcutVerified = false
+    @AppStorage("groupSmsShortcutVerifiedAt") private var shortcutVerifiedAt = ""
     @State private var phoneNumbersText = ""
     @State private var repeatsPerPhone = 3
     @State private var messageTemplate = "소희가 간다 단체문자 테스트 {순번}/{전체}"
@@ -37,9 +40,59 @@ struct GroupSmsTestView: View {
         GroupSmsBuilder.policySummary(totalCount: totalCount)
     }
 
+    private var shortcutInstallURL: URL? {
+        let trimmed = shortcutInstallURLText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("단축어 설치") {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: shortcutVerified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(shortcutVerified ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(shortcutVerified ? "단축어 확인됨" : "단축어 확인 필요")
+                                .font(.headline)
+                            Text("필수 단축어: \(GroupSmsBuilder.shortcutName) · v\(GroupSmsBuilder.shortcutVersion)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if !shortcutVerifiedAt.isEmpty {
+                                Text("마지막 확인: \(shortcutVerifiedAt)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    TextField("iCloud 단축어 공유 링크", text: $shortcutInstallURLText, axis: .vertical)
+
+                    Button {
+                        openShortcutInstallLink()
+                    } label: {
+                        Label("단축어 설치하기", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(shortcutInstallURL == nil)
+
+                    Button {
+                        openShortcutForVerification()
+                    } label: {
+                        Label("설치 확인 테스트", systemImage: "checkmark.circle")
+                    }
+
+                    Button {
+                        copyShortcutRecipe()
+                    } label: {
+                        Label("단축어 구성 안내 복사", systemImage: "doc.on.doc")
+                    }
+
+                    Text("앱이 단축어를 자동 설치할 수는 없습니다. 설치 버튼은 Shortcuts 앱의 추가 화면을 열고, 사용자가 직접 단축어 추가를 눌러야 합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("테스트 수신번호") {
                     TextField("01012345678, 01098765432", text: $phoneNumbersText, axis: .vertical)
                     Stepper("번호당 반복 \(repeatsPerPhone)회", value: $repeatsPerPhone, in: 1...100)
@@ -146,6 +199,12 @@ struct GroupSmsTestView: View {
                     .disabled(totalCount == 0 || policySummary.isBlocked)
 
                     Button {
+                        openShortcutForVerification()
+                    } label: {
+                        Label("단축어만 열기", systemImage: "arrow.up.forward.app")
+                    }
+
+                    Button {
                         copyPayloadOnly()
                     } label: {
                         Label("payload만 클립보드에 복사", systemImage: "doc.on.doc")
@@ -248,6 +307,38 @@ struct GroupSmsTestView: View {
         }
     }
 
+    private func openShortcutInstallLink() {
+        guard let shortcutInstallURL else {
+            statusMessage = "단축어 설치 링크를 입력하세요."
+            return
+        }
+        openURL(shortcutInstallURL) { accepted in
+            statusMessage = accepted ? "Shortcuts 설치 화면을 열었습니다. 단축어 추가를 누른 뒤 앱으로 돌아와 설치 확인 테스트를 실행하세요." : "설치 링크를 열지 못했습니다."
+        }
+    }
+
+    private func openShortcutForVerification() {
+        guard let url = GroupSmsBuilder.shortcutsOpenURL() else {
+            statusMessage = "단축어 확인 URL을 만들지 못했습니다."
+            return
+        }
+        openURL(url) { accepted in
+            if accepted {
+                shortcutVerified = true
+                shortcutVerifiedAt = Self.statusDateFormatter.string(from: Date())
+                statusMessage = "\(GroupSmsBuilder.shortcutName) 단축어 열기를 요청했습니다. Shortcuts에서 단축어가 열리면 설치된 상태입니다."
+            } else {
+                shortcutVerified = false
+                statusMessage = "Shortcuts에서 \(GroupSmsBuilder.shortcutName) 단축어를 열지 못했습니다. 설치 링크로 먼저 추가하세요."
+            }
+        }
+    }
+
+    private func copyShortcutRecipe() {
+        copyToClipboard(Self.shortcutRecipe)
+        statusMessage = "단축어 구성 안내를 클립보드에 복사했습니다."
+    }
+
     private func copyToClipboard(_ value: String) {
         #if os(iOS)
         UIPasteboard.general.string = value
@@ -270,4 +361,39 @@ struct GroupSmsTestView: View {
         }
         return "테스트 payload를 만들지 못했습니다."
     }
+
+    private static let statusDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+
+    private static let shortcutRecipe = """
+    SoheeGroupSMS 단축어 v\(GroupSmsBuilder.shortcutVersion)
+
+    목적:
+    - 소희가 간다 앱이 클립보드에 저장한 JSON payload를 읽는다.
+    - recipients 배열을 순회하며 각 항목을 1명씩 개별 문자로 발송한다.
+    - 각 항목의 plannedDelaySeconds 만큼 대기한다.
+    - 완료/취소/오류 시 앱 callback URL을 연다.
+
+    단축어 이름:
+    \(GroupSmsBuilder.shortcutName)
+
+    입력:
+    - Shortcut Input 또는 클립보드 텍스트
+    - JSON 필드: campaignId, callbackScheme, successPath, cancelPath, errorPath, recipients
+    - recipient 필드: phoneNumber, messageBody, plannedDelaySeconds
+
+    권장 액션 순서:
+    1. 클립보드 가져오기
+    2. 입력 텍스트를 JSON/딕셔너리로 변환
+    3. recipients 가져오기
+    4. 각 recipient 반복
+    5. phoneNumber와 messageBody 추출
+    6. 메시지 보내기 액션 실행, 수신자는 phoneNumber 1명만 지정
+    7. plannedDelaySeconds가 0보다 크면 대기
+    8. 마지막에 com.lucid47.outboundsales:/group-sms/complete?campaignId=... 열기
+    """
 }

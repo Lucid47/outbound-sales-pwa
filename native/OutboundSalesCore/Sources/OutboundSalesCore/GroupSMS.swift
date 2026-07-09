@@ -152,6 +152,7 @@ public enum GroupSmsBuilderError: Error, Equatable {
 public enum GroupSmsBuilder {
     public static let shortcutName = "SoheeGroupSMS"
     public static let callbackScheme = "com.lucid47.outboundsales"
+    public static let shortcutVersion = "0.1"
 
     public static func normalizedPhoneNumbers(_ text: String) -> [String] {
         text
@@ -249,6 +250,16 @@ public enum GroupSmsBuilder {
             URLQueryItem(name: "x-success", value: "\(callbackScheme):/group-sms/complete?campaignId=\(campaignId)"),
             URLQueryItem(name: "x-cancel", value: "\(callbackScheme):/group-sms/cancel?campaignId=\(campaignId)"),
             URLQueryItem(name: "x-error", value: "\(callbackScheme):/group-sms/error?campaignId=\(campaignId)")
+        ]
+        return components.url
+    }
+
+    public static func shortcutsOpenURL(shortcutName: String = Self.shortcutName) -> URL? {
+        var components = URLComponents()
+        components.scheme = "shortcuts"
+        components.host = "open-shortcut"
+        components.queryItems = [
+            URLQueryItem(name: "name", value: shortcutName)
         ]
         return components.url
     }
