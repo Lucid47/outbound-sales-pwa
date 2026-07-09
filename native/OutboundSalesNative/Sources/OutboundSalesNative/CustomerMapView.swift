@@ -198,6 +198,7 @@ private struct MapCustomerPanel: View {
     let onHistory: () -> Void
     @State private var showingMessageSheet = false
     @State private var showingVisitSheet = false
+    @State private var callFallbackMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -256,6 +257,14 @@ private struct MapCustomerPanel: View {
             CustomerVisitPromptSheet(customer: customer)
                 .environmentObject(state)
         }
+        .alert("전화 실행 안내", isPresented: Binding(
+            get: { callFallbackMessage != nil },
+            set: { if !$0 { callFallbackMessage = nil } }
+        )) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(callFallbackMessage ?? "")
+        }
     }
 
     private var scheduleText: String {
@@ -274,9 +283,8 @@ private struct MapCustomerPanel: View {
     }
 
     private func callCustomer() {
-        state.recordContact(customer: customer, type: .call)
-        if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
-            openURL(url)
+        PhoneCallLauncher.call(customer: customer, state: state, openURL: openURL) { message in
+            callFallbackMessage = message
         }
     }
 

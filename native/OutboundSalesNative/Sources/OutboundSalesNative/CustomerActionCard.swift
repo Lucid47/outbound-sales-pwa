@@ -11,6 +11,7 @@ struct CustomerActionCard: View {
     @State private var showingPhotoSheet = false
     @State private var showingVisitSheet = false
     @State private var showingVoiceSheet = false
+    @State private var callFallbackMessage: String?
 
     private let primaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
     private let secondaryColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 2)
@@ -122,6 +123,14 @@ struct CustomerActionCard: View {
             Text("음성 메모는 iPhone에서 사용할 수 있습니다.")
             #endif
         }
+        .alert("전화 실행 안내", isPresented: Binding(
+            get: { callFallbackMessage != nil },
+            set: { if !$0 { callFallbackMessage = nil } }
+        )) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(callFallbackMessage ?? "")
+        }
     }
 
     private var regionLine: String {
@@ -156,9 +165,8 @@ struct CustomerActionCard: View {
     }
 
     private func callCustomer() {
-        state.recordContact(customer: customer, type: .call)
-        if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
-            openURL(url)
+        PhoneCallLauncher.call(customer: customer, state: state, openURL: openURL) { message in
+            callFallbackMessage = message
         }
     }
 

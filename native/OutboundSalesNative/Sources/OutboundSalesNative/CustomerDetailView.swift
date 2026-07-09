@@ -20,6 +20,7 @@ struct CustomerDetailView: View {
     @State private var showingVisitSheet = false
     @State private var selectedTextMemo: VisitLog?
     @State private var selectedVoiceMemo: VisitLog?
+    @State private var callFallbackMessage: String?
 
     private var customer: Customer? {
         state.customers.first { $0.id == customerId }
@@ -45,10 +46,7 @@ struct CustomerDetailView: View {
 
                     Section("고객 터치") {
                         Button {
-                            state.recordContact(customer: customer, type: .call)
-                            if let url = URL(string: "tel:\(cleanPhone(customer.phoneNumber))") {
-                                openURL(url)
-                            }
+                            callCustomer(customer)
                         } label: {
                             Label("전화", systemImage: "phone")
                         }
@@ -238,9 +236,23 @@ struct CustomerDetailView: View {
                     VoiceMemoDetailSheet(log: log)
                         .environmentObject(state)
                 }
+                .alert("전화 실행 안내", isPresented: Binding(
+                    get: { callFallbackMessage != nil },
+                    set: { if !$0 { callFallbackMessage = nil } }
+                )) {
+                    Button("확인", role: .cancel) {}
+                } message: {
+                    Text(callFallbackMessage ?? "")
+                }
             } else {
                 ContentUnavailableView("고객을 찾을 수 없습니다.", systemImage: "person.crop.circle.badge.questionmark")
             }
+        }
+    }
+
+    private func callCustomer(_ customer: Customer) {
+        PhoneCallLauncher.call(customer: customer, state: state, openURL: openURL) { message in
+            callFallbackMessage = message
         }
     }
 
