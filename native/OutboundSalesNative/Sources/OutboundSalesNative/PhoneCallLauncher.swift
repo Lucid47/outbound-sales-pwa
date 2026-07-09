@@ -44,7 +44,7 @@ enum PhoneCallLauncher {
     }
 
     private static var fallbackMessage: String {
-        "이 iPad에서는 전화앱을 열 수 없어 번호를 복사했습니다. iPhone 통화 연동 또는 FaceTime 통화 설정을 확인하세요."
+        "전화앱을 열 수 없어 번호를 복사했습니다. iPad의 Phone 앱 설치, iPhone 통화 연동, FaceTime 통화 설정을 확인하세요."
     }
 
     private static func copyPhone(_ phone: String) {
