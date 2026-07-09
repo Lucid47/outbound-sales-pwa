@@ -6,11 +6,33 @@ import UIKit
 import AppKit
 #endif
 
+private enum GroupSmsComposeMode: String, CaseIterable, Identifiable {
+    case customers = "고객"
+    case test = "테스트"
+
+    var id: String { rawValue }
+}
+
+private enum GroupSmsTargetScope: String, CaseIterable, Identifiable {
+    case selectedList = "현재 리스트"
+    case todaySchedule = "오늘 스케줄"
+    case visible = "현재 검색 결과"
+
+    var id: String { rawValue }
+}
+
 struct GroupSmsTestView: View {
+    @EnvironmentObject private var state: NativeAppState
     @Environment(\.openURL) private var openURL
     @AppStorage("groupSmsShortcutInstallURL") private var shortcutInstallURLText = ""
     @AppStorage("groupSmsShortcutVerified") private var shortcutVerified = false
     @AppStorage("groupSmsShortcutVerifiedAt") private var shortcutVerifiedAt = ""
+    @State private var composeMode: GroupSmsComposeMode = .customers
+    @State private var targetScope: GroupSmsTargetScope = .selectedList
+    @State private var excludedCustomerIds = Set<String>()
+    @State private var removesDuplicatePhones = true
+    @State private var campaignTitle = "단체문자"
+    @State private var selectedTemplateId = ""
     @State private var phoneNumbersText = ""
     @State private var repeatsPerPhone = 3
     @State private var messageTemplate = "소희가 간다 단체문자 테스트 {순번}/{전체}"
@@ -27,13 +49,35 @@ struct GroupSmsTestView: View {
     @State private var showingRunConfirmation = false
     @State private var pendingPayloadJSON = ""
     @State private var pendingShortcutURL: URL?
+    @State private var pendingCampaignId = ""
 
     private var normalizedPhones: [String] {
         GroupSmsBuilder.normalizedPhoneNumbers(phoneNumbersText)
     }
 
+    private var targetCandidates: [Customer] {
+        switch targetScope {
+        case .selectedList:
+            guard let selectedListId = state.selectedListId else { return [] }
+            return state.customers.filter { $0.customerListId == selectedListId }
+        case .todaySchedule:
+            return state.todayScheduledCustomers
+        case .visible:
+            return state.visibleCustomers
+        }
+    }
+
+    private var selectedCustomers: [Customer] {
+        targetCandidates.filter { !excludedCustomerIds.contains($0.id) && hasDialablePhone($0.phoneNumber) }
+    }
+
     private var totalCount: Int {
-        normalizedPhones.count * max(0, repeatsPerPhone)
+        switch composeMode {
+        case .customers:
+            return selectedCustomers.count
+        case .test:
+            return normalizedPhones.count * max(0, repeatsPerPhone)
+        }
     }
 
     private var policySummary: GroupSmsPolicySummary {
@@ -49,6 +93,17 @@ struct GroupSmsTestView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker("모드", selection: $composeMode) {
+                        ForEach(GroupSmsComposeMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } footer: {
+                    Text(composeMode == .customers ? "고객 데이터를 대상으로 1명씩 개별 문자 요청 payload를 만듭니다." : "내 번호 1개 또는 2개로 단축어 동작을 반복 검증합니다.")
+                }
+
                 Section("단축어 설치") {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: shortcutVerified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
@@ -93,25 +148,32 @@ struct GroupSmsTestView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Section("테스트 수신번호") {
-                    TextField("01012345678, 01098765432", text: $phoneNumbersText, axis: .vertical)
-                    Stepper("번호당 반복 \(repeatsPerPhone)회", value: $repeatsPerPhone, in: 1...100)
-                    LabeledContent("총 발송 요청", value: "\(totalCount)건")
-                    if normalizedPhones.isEmpty {
-                        Text("테스트할 내 번호 1개 또는 2개를 입력하세요. 쉼표, 공백, 줄바꿈으로 구분할 수 있습니다.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(normalizedPhones.joined(separator: ", "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if composeMode == .customers {
+                    customerTargetSection
+                } else {
+                    testTargetSection
                 }
 
                 Section("메시지") {
+                    if composeMode == .customers {
+                        Picker("템플릿", selection: $selectedTemplateId) {
+                            Text("직접 작성").tag("")
+                            ForEach(state.messageTemplates) { template in
+                                Text(template.title).tag(template.id)
+                            }
+                        }
+                        .onChange(of: selectedTemplateId) { _, id in
+                            guard let template = state.messageTemplates.first(where: { $0.id == id }) else { return }
+                            messageTemplate = template.body
+                            if campaignTitle == "단체문자" || campaignTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                campaignTitle = template.title
+                            }
+                        }
+                        TextField("캠페인 이름", text: $campaignTitle)
+                    }
                     TextEditor(text: $messageTemplate)
                         .frame(minHeight: 90)
-                    Text("사용 가능: {순번}, {전체}, {번호순번}, {반복}")
+                    Text(composeMode == .customers ? "사용 가능: {고객명}, {이름}, {연락처}, {주소}, {메모}, {순번}, {전체}" : "사용 가능: {순번}, {전체}, {번호순번}, {반복}")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -211,9 +273,32 @@ struct GroupSmsTestView: View {
                     }
                     .disabled(totalCount == 0)
 
-                    Text("단축어 이름은 \(GroupSmsBuilder.shortcutName)입니다. 설치 전에는 실행 버튼을 눌러도 Shortcuts 앱에서 오류가 날 수 있습니다.")
+                    Text("단축어 이름은 \(GroupSmsBuilder.shortcutName)입니다. 실제 SMS 최종 도달 여부는 앱이 알 수 없고, 앱에는 발송 요청/콜백 상태만 기록됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                if !state.groupSmsCampaigns.isEmpty {
+                    Section("최근 캠페인") {
+                        ForEach(state.groupSmsCampaigns.prefix(5)) { campaign in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(campaign.title)
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(statusText(campaign.status))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(statusColor(campaign.status))
+                                }
+                                Text("\(campaign.recipients.count)명 · \(campaign.targetDescription)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(campaign.updatedAt, format: .dateTime.year().month().day().hour().minute())
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
 
                 if !statusMessage.isEmpty {
@@ -224,14 +309,71 @@ struct GroupSmsTestView: View {
                     }
                 }
             }
-            .navigationTitle("단체문자 검증")
-            .confirmationDialog("테스트 문자 \(totalCount)건을 Shortcuts로 넘길까요?", isPresented: $showingRunConfirmation) {
+            .navigationTitle("단체문자")
+            .onAppear(perform: applyDefaultTemplateIfNeeded)
+            .confirmationDialog("\(totalCount)건을 Shortcuts로 넘길까요?", isPresented: $showingRunConfirmation) {
                 Button("단축어 실행") {
                     runPendingShortcut()
                 }
                 Button("취소", role: .cancel) {}
             } message: {
-                Text("입력한 테스트 번호로 실제 문자 발송 흐름이 시작될 수 있습니다.")
+                Text(composeMode == .customers ? "선택한 고객에게 실제 문자 발송 흐름이 시작될 수 있습니다." : "입력한 테스트 번호로 실제 문자 발송 흐름이 시작될 수 있습니다.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var customerTargetSection: some View {
+        Section("발송 대상") {
+            Picker("대상 범위", selection: $targetScope) {
+                ForEach(GroupSmsTargetScope.allCases) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            Toggle("중복 전화번호 제거", isOn: $removesDuplicatePhones)
+            LabeledContent("후보 고객", value: "\(targetCandidates.count)명")
+            LabeledContent("발송 가능", value: "\(selectedCustomers.count)명")
+            if targetCandidates.isEmpty {
+                Text("선택한 범위에 고객이 없습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(targetCandidates.prefix(80)) { customer in
+                    Toggle(isOn: customerSelectionBinding(customer)) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(customer.name.isEmpty ? "이름 없음" : customer.name)
+                                .font(.headline)
+                            Text([customer.phoneNumber, customer.address].filter { !$0.isEmpty }.joined(separator: " · "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .disabled(!hasDialablePhone(customer.phoneNumber))
+                }
+                if targetCandidates.count > 80 {
+                    Text("화면 성능을 위해 앞 80명만 개별 제외를 표시합니다. 전체 대상은 범위 기준으로 포함됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var testTargetSection: some View {
+        Section("테스트 수신번호") {
+            TextField("01012345678, 01098765432", text: $phoneNumbersText, axis: .vertical)
+            Stepper("번호당 반복 \(repeatsPerPhone)회", value: $repeatsPerPhone, in: 1...100)
+            LabeledContent("총 발송 요청", value: "\(totalCount)건")
+            if normalizedPhones.isEmpty {
+                Text("테스트할 내 번호 1개 또는 2개를 입력하세요. 쉼표, 공백, 줄바꿈으로 구분할 수 있습니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(normalizedPhones.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -249,21 +391,44 @@ struct GroupSmsTestView: View {
         )
     }
 
-    private func buildRecipients() throws -> [GroupSmsRecipient] {
-        try GroupSmsBuilder.buildTestRecipients(
-            input: GroupSmsTestInput(
-                phoneNumbers: normalizedPhones,
-                repeatsPerPhone: repeatsPerPhone,
-                messageTemplate: messageTemplate,
-                delaySettings: currentDelaySettings()
-            )
+    private func customerSelectionBinding(_ customer: Customer) -> Binding<Bool> {
+        Binding(
+            get: { !excludedCustomerIds.contains(customer.id) },
+            set: { isSelected in
+                if isSelected {
+                    excludedCustomerIds.remove(customer.id)
+                } else {
+                    excludedCustomerIds.insert(customer.id)
+                }
+            }
         )
+    }
+
+    private func buildRecipients() throws -> [GroupSmsRecipient] {
+        switch composeMode {
+        case .customers:
+            return try GroupSmsBuilder.buildCustomerRecipients(
+                customers: selectedCustomers,
+                messageTemplate: messageTemplate,
+                delaySettings: currentDelaySettings(),
+                removesDuplicatePhones: removesDuplicatePhones
+            )
+        case .test:
+            return try GroupSmsBuilder.buildTestRecipients(
+                input: GroupSmsTestInput(
+                    phoneNumbers: normalizedPhones,
+                    repeatsPerPhone: repeatsPerPhone,
+                    messageTemplate: messageTemplate,
+                    delaySettings: currentDelaySettings()
+                )
+            )
+        }
     }
 
     private func buildPreview() {
         do {
             lastRecipients = try buildRecipients()
-            statusMessage = "\(lastRecipients.count)건의 테스트 발송 목록을 만들었습니다."
+            statusMessage = "\(lastRecipients.count)건의 발송 목록을 만들었습니다."
         } catch {
             lastRecipients = []
             statusMessage = errorMessage(error)
@@ -273,10 +438,22 @@ struct GroupSmsTestView: View {
     private func prepareShortcutRun() {
         do {
             let recipients = try buildRecipients()
-            let payload = GroupSmsBuilder.makePayload(campaignTitle: "반복 테스트", recipients: recipients)
+            let campaignId = UUID().uuidString
+            let title = resolvedCampaignTitle()
+            let payload = GroupSmsBuilder.makePayload(campaignId: campaignId, campaignTitle: title, recipients: recipients)
             pendingPayloadJSON = try GroupSmsBuilder.encodePayload(payload)
             pendingShortcutURL = GroupSmsBuilder.shortcutsRunURL(campaignId: payload.campaignId)
+            pendingCampaignId = campaignId
             lastRecipients = recipients
+            state.saveGroupSmsCampaign(
+                id: campaignId,
+                title: title,
+                customerListId: composeMode == .customers ? state.selectedListId : nil,
+                targetDescription: targetDescription(),
+                messageTemplate: messageTemplate,
+                recipients: recipients,
+                status: .ready
+            )
             showingRunConfirmation = true
         } catch {
             statusMessage = errorMessage(error)
@@ -286,7 +463,7 @@ struct GroupSmsTestView: View {
     private func copyPayloadOnly() {
         do {
             let recipients = try buildRecipients()
-            let payload = GroupSmsBuilder.makePayload(campaignTitle: "반복 테스트", recipients: recipients)
+            let payload = GroupSmsBuilder.makePayload(campaignTitle: resolvedCampaignTitle(), recipients: recipients)
             let json = try GroupSmsBuilder.encodePayload(payload)
             copyToClipboard(json)
             lastRecipients = recipients
@@ -302,8 +479,18 @@ struct GroupSmsTestView: View {
             return
         }
         copyToClipboard(pendingPayloadJSON)
+        if !pendingCampaignId.isEmpty {
+            state.markGroupSmsCampaign(pendingCampaignId, status: .shortcutOpened)
+        }
         openURL(pendingShortcutURL) { accepted in
-            statusMessage = accepted ? "Shortcuts를 열었습니다. 단축어에서 발송 흐름을 확인하세요." : "Shortcuts를 열지 못했습니다."
+            if accepted {
+                statusMessage = "Shortcuts를 열었습니다. 단축어에서 발송 흐름을 확인하세요."
+            } else {
+                if !pendingCampaignId.isEmpty {
+                    state.markGroupSmsCampaign(pendingCampaignId, status: .shortcutFailed)
+                }
+                statusMessage = "Shortcuts를 열지 못했습니다."
+            }
         }
     }
 
@@ -357,9 +544,60 @@ struct GroupSmsTestView: View {
                 return "반복 횟수를 확인하세요."
             case .emptyMessage:
                 return "메시지 본문을 입력하세요."
+            case .noRecipients:
+                return "발송 가능한 고객이 없습니다."
             }
         }
         return "테스트 payload를 만들지 못했습니다."
+    }
+
+    private func applyDefaultTemplateIfNeeded() {
+        guard selectedTemplateId.isEmpty, messageTemplate.hasPrefix("소희가 간다 단체문자 테스트") else { return }
+        if let template = state.messageTemplates.first(where: { $0.isDefault }) ?? state.messageTemplates.first {
+            selectedTemplateId = template.id
+            messageTemplate = template.body
+            campaignTitle = template.title
+        }
+    }
+
+    private func resolvedCampaignTitle() -> String {
+        let trimmed = campaignTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return composeMode == .customers ? "고객 단체문자" : "반복 테스트"
+    }
+
+    private func targetDescription() -> String {
+        switch composeMode {
+        case .customers:
+            return "\(targetScope.rawValue) · \(selectedCustomers.count)명"
+        case .test:
+            return "반복 테스트 · \(normalizedPhones.count)개 번호"
+        }
+    }
+
+    private func statusText(_ status: GroupSmsCampaignStatus) -> String {
+        switch status {
+        case .draft: return "임시"
+        case .ready: return "준비"
+        case .shortcutOpened: return "실행"
+        case .requested: return "요청완료"
+        case .cancelled: return "취소"
+        case .shortcutFailed: return "오류"
+        case .unknown: return "미확인"
+        }
+    }
+
+    private func statusColor(_ status: GroupSmsCampaignStatus) -> Color {
+        switch status {
+        case .requested:
+            return .green
+        case .cancelled, .shortcutFailed:
+            return .red
+        case .shortcutOpened, .ready:
+            return .orange
+        case .draft, .unknown:
+            return .secondary
+        }
     }
 
     private static let statusDateFormatter: DateFormatter = {

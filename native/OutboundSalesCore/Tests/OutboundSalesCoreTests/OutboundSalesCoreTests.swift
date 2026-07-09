@@ -129,6 +129,29 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(recipients.map(\.plannedDelaySeconds), [0, 1, 1, 30])
     }
 
+    func testBuildsGroupSmsCustomerRecipientsWithPersonalizedFields() throws {
+        let now = Date(timeIntervalSince1970: 1)
+        let customers = [
+            Customer(id: "customer-1", customerListId: "list-1", name: "김소희", phoneNumber: "010-1111-2222", address: "서울 성동구 성수일로 10", notes: "오전 선호", createdAt: now, updatedAt: now),
+            Customer(id: "customer-2", customerListId: "list-1", name: "박영은", phoneNumber: "010-3333-4444", address: "서울 송파구", notes: "", createdAt: now, updatedAt: now),
+            Customer(id: "customer-3", customerListId: "list-1", name: "중복", phoneNumber: "01033334444", address: "서울 강남구", notes: "", createdAt: now, updatedAt: now)
+        ]
+
+        let recipients = try GroupSmsBuilder.buildCustomerRecipients(
+            customers: customers,
+            messageTemplate: "{고객명}님 {주소} / {순번}/{전체}",
+            delaySettings: GroupSmsDelaySettings(mode: .fixed, fixedDelaySeconds: 2),
+            removesDuplicatePhones: true,
+            idGenerator: { "recipient" }
+        )
+
+        XCTAssertEqual(recipients.count, 2)
+        XCTAssertEqual(recipients[0].customerId, "customer-1")
+        XCTAssertEqual(recipients[0].messageBody, "김소희님 서울 성동구 성수일로 10 / 001/2")
+        XCTAssertEqual(recipients[1].messageBody, "박영은님 서울 송파구 / 002/2")
+        XCTAssertEqual(recipients.map(\.plannedDelaySeconds), [0, 2])
+    }
+
     func testEncodesGroupSmsPayloadAndShortcutURL() throws {
         let recipients = [
             GroupSmsRecipient(
@@ -210,6 +233,31 @@ final class OutboundSalesCoreTests: XCTestCase {
         let snapshot = NativeAppSnapshot(
             customerLists: [list],
             customers: [customer],
+            groupSmsCampaigns: [
+                GroupSmsCampaign(
+                    id: "campaign-1",
+                    title: "테스트 문자",
+                    customerListId: list.id,
+                    targetDescription: "현재 리스트 · 1명",
+                    messageTemplate: "{고객명}님",
+                    status: .requested,
+                    recipients: [
+                        GroupSmsRecipient(
+                            id: "recipient-1",
+                            customerId: customer.id,
+                            displayName: customer.name,
+                            phoneNumber: cleanPhone(customer.phoneNumber),
+                            messageBody: "홍길동님",
+                            orderIndex: 0,
+                            plannedDelaySeconds: 0
+                        )
+                    ],
+                    requestedAt: now,
+                    completedAt: now,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
             selectedListId: list.id,
             savedAt: now
         )

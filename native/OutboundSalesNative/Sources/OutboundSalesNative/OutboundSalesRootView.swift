@@ -30,6 +30,7 @@ public struct OutboundSalesRootView: View {
                 .tabItem { Label("기록", systemImage: "clock.arrow.circlepath") }
 
             GroupSmsTestView()
+                .environmentObject(state)
                 .tabItem { Label("단체문자", systemImage: "message.badge") }
 
             SettingsView()
@@ -39,7 +40,18 @@ public struct OutboundSalesRootView: View {
         .task {
             await state.performStartupMaintenance()
         }
+        .onOpenURL { url in
+            state.handleGroupSmsCallback(url: url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .outboundSalesOpenURL)) { notification in
+            guard let url = notification.object as? URL else { return }
+            state.handleGroupSmsCallback(url: url)
+        }
     }
+}
+
+public extension Notification.Name {
+    static let outboundSalesOpenURL = Notification.Name("OutboundSalesOpenURL")
 }
 
 struct TodayView: View {

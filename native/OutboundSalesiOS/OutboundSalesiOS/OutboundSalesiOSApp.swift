@@ -36,5 +36,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UIHostingController(rootView: OutboundSalesRootView())
         self.window = window
         window.makeKeyAndVisible()
+
+        if let url = connectionOptions.urlContexts.first?.url {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .outboundSalesOpenURL, object: url)
+            }
+        }
+    }
+
+    func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        guard let url = URLContexts.first?.url else { return }
+        NotificationCenter.default.post(name: .outboundSalesOpenURL, object: url)
     }
 }

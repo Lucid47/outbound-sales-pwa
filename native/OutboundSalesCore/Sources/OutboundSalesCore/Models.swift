@@ -18,6 +18,7 @@ public enum ContactLogType: String, Codable, Sendable {
     case call
     case manualSms
     case templateSms
+    case groupSms
     case note
     case statusComplete
     case statusReopen

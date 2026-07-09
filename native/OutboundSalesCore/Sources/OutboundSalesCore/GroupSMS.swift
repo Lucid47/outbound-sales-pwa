@@ -127,6 +127,46 @@ public struct GroupSmsCampaignPayload: Codable, Equatable, Sendable {
     }
 }
 
+public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var customerListId: String?
+    public var targetDescription: String
+    public var messageTemplate: String
+    public var status: GroupSmsCampaignStatus
+    public var recipients: [GroupSmsRecipient]
+    public var requestedAt: Date?
+    public var completedAt: Date?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        title: String,
+        customerListId: String?,
+        targetDescription: String,
+        messageTemplate: String,
+        status: GroupSmsCampaignStatus = .draft,
+        recipients: [GroupSmsRecipient],
+        requestedAt: Date? = nil,
+        completedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.title = title
+        self.customerListId = customerListId
+        self.targetDescription = targetDescription
+        self.messageTemplate = messageTemplate
+        self.status = status
+        self.recipients = recipients
+        self.requestedAt = requestedAt
+        self.completedAt = completedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct GroupSmsPolicySummary: Equatable, Sendable {
     public var totalCount: Int
     public var dailyLimit: Int
@@ -147,6 +187,7 @@ public enum GroupSmsBuilderError: Error, Equatable {
     case noPhoneNumbers
     case invalidRepeatCount
     case emptyMessage
+    case noRecipients
 }
 
 public enum GroupSmsBuilder {
@@ -206,6 +247,51 @@ public enum GroupSmsBuilder {
             }
         }
         return recipients
+    }
+
+    public static func buildCustomerRecipients(
+        customers: [Customer],
+        messageTemplate: String,
+        delaySettings: GroupSmsDelaySettings,
+        removesDuplicatePhones: Bool = true,
+        idGenerator: () -> String = { UUID().uuidString },
+        randomInt: (ClosedRange<Int>) -> Int = { Int.random(in: $0) }
+    ) throws -> [GroupSmsRecipient] {
+        let template = messageTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !template.isEmpty else { throw GroupSmsBuilderError.emptyMessage }
+
+        var seenPhones = Set<String>()
+        let dialableCustomers = customers.compactMap { customer -> (Customer, String)? in
+            let phone = cleanPhone(customer.phoneNumber)
+            guard hasDialablePhone(phone) else { return nil }
+            if removesDuplicatePhones {
+                guard seenPhones.insert(phone).inserted else { return nil }
+            }
+            return (customer, phone)
+        }
+        guard !dialableCustomers.isEmpty else { throw GroupSmsBuilderError.noRecipients }
+
+        let total = dialableCustomers.count
+        return dialableCustomers.enumerated().map { index, item in
+            GroupSmsRecipient(
+                id: idGenerator(),
+                customerId: item.0.id,
+                displayName: item.0.name.isEmpty ? item.1 : item.0.name,
+                phoneNumber: item.1,
+                messageBody: renderCustomerMessage(
+                    template,
+                    customer: item.0,
+                    sequence: index + 1,
+                    total: total
+                ),
+                orderIndex: index,
+                plannedDelaySeconds: delaySeconds(
+                    forOrder: index + 1,
+                    settings: delaySettings,
+                    randomInt: randomInt
+                )
+            )
+        }
     }
 
     public static func makePayload(
@@ -341,5 +427,28 @@ public enum GroupSmsBuilder {
             .replacingOccurrences(of: "{전체}", with: "\(total)")
             .replacingOccurrences(of: "{번호순번}", with: "\(phoneIndex)")
             .replacingOccurrences(of: "{반복}", with: "\(repeatIndex)")
+    }
+
+    private static func renderCustomerMessage(
+        _ template: String,
+        customer: Customer,
+        sequence: Int,
+        total: Int
+    ) -> String {
+        template
+            .replacingOccurrences(of: "{고객명}", with: customer.name)
+            .replacingOccurrences(of: "{{고객명}}", with: customer.name)
+            .replacingOccurrences(of: "{이름}", with: customer.name)
+            .replacingOccurrences(of: "{{이름}}", with: customer.name)
+            .replacingOccurrences(of: "{연락처}", with: customer.phoneNumber)
+            .replacingOccurrences(of: "{{연락처}}", with: customer.phoneNumber)
+            .replacingOccurrences(of: "{주소}", with: customer.address)
+            .replacingOccurrences(of: "{{주소}}", with: customer.address)
+            .replacingOccurrences(of: "{메모}", with: customer.notes)
+            .replacingOccurrences(of: "{{메모}}", with: customer.notes)
+            .replacingOccurrences(of: "{순번}", with: String(format: "%03d", sequence))
+            .replacingOccurrences(of: "{{순번}}", with: String(format: "%03d", sequence))
+            .replacingOccurrences(of: "{전체}", with: "\(total)")
+            .replacingOccurrences(of: "{{전체}}", with: "\(total)")
     }
 }

@@ -10,6 +10,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var visitSchedules: [VisitSchedule]
     public var visitScheduleItems: [VisitScheduleItem]
     public var messageTemplates: [MessageTemplate]
+    public var groupSmsCampaigns: [GroupSmsCampaign]
     public var selectedListId: String?
     public var savedAt: Date
 
@@ -23,6 +24,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         visitSchedules: [VisitSchedule] = [],
         visitScheduleItems: [VisitScheduleItem] = [],
         messageTemplates: [MessageTemplate] = [],
+        groupSmsCampaigns: [GroupSmsCampaign] = [],
         selectedListId: String?,
         savedAt: Date = Date()
     ) {
@@ -35,6 +37,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.visitSchedules = visitSchedules
         self.visitScheduleItems = visitScheduleItems
         self.messageTemplates = messageTemplates
+        self.groupSmsCampaigns = groupSmsCampaigns
         self.selectedListId = selectedListId
         self.savedAt = savedAt
     }
@@ -50,6 +53,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.visitSchedules = try container.decodeIfPresent([VisitSchedule].self, forKey: .visitSchedules) ?? []
         self.visitScheduleItems = try container.decodeIfPresent([VisitScheduleItem].self, forKey: .visitScheduleItems) ?? []
         self.messageTemplates = try container.decodeIfPresent([MessageTemplate].self, forKey: .messageTemplates) ?? []
+        self.groupSmsCampaigns = try container.decodeIfPresent([GroupSmsCampaign].self, forKey: .groupSmsCampaigns) ?? []
         self.selectedListId = try container.decodeIfPresent(String.self, forKey: .selectedListId)
         self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt) ?? Date()
     }

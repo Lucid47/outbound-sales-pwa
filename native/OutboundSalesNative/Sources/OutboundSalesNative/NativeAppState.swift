@@ -27,6 +27,7 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var visitSchedules: [VisitSchedule]
     @Published public private(set) var visitScheduleItems: [VisitScheduleItem]
     @Published public private(set) var messageTemplates: [MessageTemplate]
+    @Published public private(set) var groupSmsCampaigns: [GroupSmsCampaign]
     @Published public private(set) var selectedListId: String?
     @Published public var searchText = ""
     @Published public var importMessage = ""
@@ -61,6 +62,7 @@ public final class NativeAppState: ObservableObject {
                 self.visitSchedules = snapshot.visitSchedules
                 self.visitScheduleItems = snapshot.visitScheduleItems
                 self.messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
+                self.groupSmsCampaigns = snapshot.groupSmsCampaigns
                 self.selectedListId = snapshot.selectedListId ?? snapshot.customerLists.first?.id
                 self.storageMessage = "저장된 데이터를 불러왔습니다."
                 return
@@ -79,6 +81,7 @@ public final class NativeAppState: ObservableObject {
             self.visitSchedules = []
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
+            self.groupSmsCampaigns = []
             self.selectedListId = seed.lists.first?.id
         } else {
             self.customerLists = []
@@ -89,6 +92,7 @@ public final class NativeAppState: ObservableObject {
             self.visitSchedules = []
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
+            self.groupSmsCampaigns = []
             self.selectedListId = nil
         }
     }
@@ -368,6 +372,78 @@ public final class NativeAppState: ObservableObject {
         )
         actionMessage = "기록을 남겼습니다."
         persist()
+    }
+
+    public func saveGroupSmsCampaign(
+        id: String,
+        title: String,
+        customerListId: String?,
+        targetDescription: String,
+        messageTemplate: String,
+        recipients: [GroupSmsRecipient],
+        status: GroupSmsCampaignStatus
+    ) {
+        let now = Date()
+        let campaign = GroupSmsCampaign(
+            id: id,
+            title: title,
+            customerListId: customerListId,
+            targetDescription: targetDescription,
+            messageTemplate: messageTemplate,
+            status: status,
+            recipients: recipients,
+            requestedAt: status == .shortcutOpened || status == .requested ? now : nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        groupSmsCampaigns.removeAll { $0.id == id }
+        groupSmsCampaigns.insert(campaign, at: 0)
+        persist()
+    }
+
+    public func markGroupSmsCampaign(_ campaignId: String, status: GroupSmsCampaignStatus) {
+        guard let index = groupSmsCampaigns.firstIndex(where: { $0.id == campaignId }) else {
+            actionMessage = "단체문자 캠페인을 찾지 못했습니다."
+            return
+        }
+
+        let now = Date()
+        groupSmsCampaigns[index].status = status
+        groupSmsCampaigns[index].updatedAt = now
+        if status == .shortcutOpened || status == .requested {
+            groupSmsCampaigns[index].requestedAt = groupSmsCampaigns[index].requestedAt ?? now
+        }
+        if status == .requested || status == .cancelled || status == .shortcutFailed {
+            groupSmsCampaigns[index].completedAt = now
+        }
+
+        if status == .requested {
+            recordGroupSmsContactLogs(for: groupSmsCampaigns[index])
+        }
+        actionMessage = groupSmsStatusMessage(status)
+        persist()
+    }
+
+    public func handleGroupSmsCallback(url: URL) {
+        guard url.scheme == GroupSmsBuilder.callbackScheme else { return }
+        let path = url.path
+        guard path.hasPrefix("/group-sms") else { return }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        guard let campaignId = components?.queryItems?.first(where: { $0.name == "campaignId" })?.value else {
+            actionMessage = "단체문자 콜백에 캠페인 ID가 없습니다."
+            return
+        }
+
+        switch path {
+        case "/group-sms/complete":
+            markGroupSmsCampaign(campaignId, status: .requested)
+        case "/group-sms/cancel":
+            markGroupSmsCampaign(campaignId, status: .cancelled)
+        case "/group-sms/error":
+            markGroupSmsCampaign(campaignId, status: .shortcutFailed)
+        default:
+            break
+        }
     }
 
     public func addNote(customer: Customer, memo: String) {
@@ -843,6 +919,7 @@ public final class NativeAppState: ObservableObject {
         visitSchedules = snapshot.visitSchedules
         visitScheduleItems = snapshot.visitScheduleItems
         messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
+        groupSmsCampaigns = snapshot.groupSmsCampaigns
         selectedListId = snapshot.selectedListId ?? customerLists.first?.id
     }
 
@@ -865,6 +942,10 @@ public final class NativeAppState: ObservableObject {
         photoLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
         visitSchedules.removeAll { selectedListIds.contains($0.customerListId) }
         visitScheduleItems.removeAll { selectedListIds.contains($0.customerListId) || targetScheduleIds.contains($0.scheduleId) || targetCustomerIds.contains($0.customerId) }
+        groupSmsCampaigns.removeAll { campaign in
+            campaign.customerListId.map { selectedListIds.contains($0) } ?? false ||
+            campaign.recipients.contains { $0.customerId.map { targetCustomerIds.contains($0) } ?? false }
+        }
 
         let restoredLists = remoteSnapshot.customerLists.filter { selectedListIds.contains($0.id) }
         let restoredCustomers = remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }
@@ -880,6 +961,10 @@ public final class NativeAppState: ObservableObject {
         photoLogs.append(contentsOf: restoredPhotoLogs)
         visitSchedules.append(contentsOf: restoredSchedules)
         visitScheduleItems.append(contentsOf: remoteSnapshot.visitScheduleItems.filter { selectedListIds.contains($0.customerListId) && restoredScheduleIds.contains($0.scheduleId) && restoredCustomerIds.contains($0.customerId) })
+        groupSmsCampaigns.append(contentsOf: remoteSnapshot.groupSmsCampaigns.filter { campaign in
+            campaign.customerListId.map { selectedListIds.contains($0) } ?? false ||
+            campaign.recipients.contains { $0.customerId.map { restoredCustomerIds.contains($0) } ?? false }
+        })
         messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
 
@@ -1019,6 +1104,7 @@ public final class NativeAppState: ObservableObject {
             visitSchedules = []
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
+            groupSmsCampaigns = []
             selectedListId = seed.lists.first?.id
         } else {
             customerLists = []
@@ -1029,6 +1115,7 @@ public final class NativeAppState: ObservableObject {
             visitSchedules = []
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
+            groupSmsCampaigns = []
             selectedListId = nil
         }
         do {
@@ -1065,6 +1152,10 @@ public final class NativeAppState: ObservableObject {
             visitSchedules: filteredSchedules,
             visitScheduleItems: visitScheduleItems.filter { filteredListIds.contains($0.customerListId) && filteredScheduleIds.contains($0.scheduleId) && filteredCustomerIds.contains($0.customerId) },
             messageTemplates: messageTemplates,
+            groupSmsCampaigns: groupSmsCampaigns.filter { campaign in
+                campaign.customerListId.map { filteredListIds.contains($0) } ?? false ||
+                campaign.recipients.contains { $0.customerId.map { filteredCustomerIds.contains($0) } ?? false }
+            },
             selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
     }
@@ -1115,6 +1206,7 @@ public final class NativeAppState: ObservableObject {
         case .call: return "전화 시도"
         case .manualSms: return "문자 시도"
         case .templateSms: return "템플릿 문자"
+        case .groupSms: return "단체문자 요청"
         case .note: return "메모"
         case .statusComplete: return "완료 처리"
         case .statusReopen: return "완료 취소"
@@ -1130,6 +1222,53 @@ public final class NativeAppState: ObservableObject {
         case .saved: return "저장됨"
         case .cancelled: return "취소"
         case .unknown: return "상태 미확인"
+        }
+    }
+
+    private func recordGroupSmsContactLogs(for campaign: GroupSmsCampaign) {
+        let now = Date()
+        let knownCustomers = Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0) })
+        let existingKeys = Set(contactLogs.compactMap { log -> String? in
+            guard log.type == .groupSms, log.templateId == campaign.id else { return nil }
+            return "\(log.customerId)-\(campaign.id)"
+        })
+
+        let newLogs = campaign.recipients.compactMap { recipient -> ContactLog? in
+            guard let customerId = recipient.customerId,
+                  let customer = knownCustomers[customerId],
+                  !existingKeys.contains("\(customerId)-\(campaign.id)") else {
+                return nil
+            }
+            return ContactLog(
+                id: UUID().uuidString,
+                customerListId: customer.customerListId,
+                customerId: customer.id,
+                type: .groupSms,
+                templateId: campaign.id,
+                messageBody: recipient.messageBody,
+                result: .opened,
+                createdAt: now
+            )
+        }
+        contactLogs.insert(contentsOf: newLogs, at: 0)
+    }
+
+    private func groupSmsStatusMessage(_ status: GroupSmsCampaignStatus) -> String {
+        switch status {
+        case .draft:
+            return "단체문자 캠페인을 임시 저장했습니다."
+        case .ready:
+            return "단체문자 캠페인을 준비했습니다."
+        case .shortcutOpened:
+            return "단체문자 단축어를 열었습니다."
+        case .requested:
+            return "단체문자 발송 요청 완료 콜백을 받았습니다."
+        case .cancelled:
+            return "단체문자 단축어 실행이 취소되었습니다."
+        case .shortcutFailed:
+            return "단체문자 단축어 실행 오류가 기록되었습니다."
+        case .unknown:
+            return "단체문자 상태를 확인하지 못했습니다."
         }
     }
 
@@ -1232,6 +1371,7 @@ public final class NativeAppState: ObservableObject {
         let mergedSchedules = mergeById(remote.snapshot.visitSchedules, local.snapshot.visitSchedules) { $0.updatedAt < $1.updatedAt }
         let mergedScheduleItems = mergeById(remote.snapshot.visitScheduleItems, local.snapshot.visitScheduleItems) { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
         let mergedTemplates = mergeById(remote.snapshot.messageTemplates, local.snapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
+        let mergedGroupSmsCampaigns = mergeById(remote.snapshot.groupSmsCampaigns, local.snapshot.groupSmsCampaigns) { $0.updatedAt < $1.updatedAt }
         let snapshot = NativeAppSnapshot(
             customerLists: mergedLists,
             customers: mergedCustomers,
@@ -1241,6 +1381,7 @@ public final class NativeAppState: ObservableObject {
             visitSchedules: mergedSchedules,
             visitScheduleItems: mergedScheduleItems,
             messageTemplates: mergedTemplates,
+            groupSmsCampaigns: mergedGroupSmsCampaigns,
             selectedListId: local.snapshot.selectedListId ?? remote.snapshot.selectedListId,
             savedAt: Date()
         )
