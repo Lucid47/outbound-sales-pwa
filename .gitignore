@@ -34,3 +34,6 @@ tools/customer-list-ocr-cli/test-data/customer/
 native/**/.build/
 native/**/DerivedData/
 native/.google-drive-oauth.local
+
+# Group SMS private device-test evidence
+docs/test-results/private/

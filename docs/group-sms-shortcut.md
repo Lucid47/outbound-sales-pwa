@@ -357,6 +357,8 @@ com.lucid47.outboundsales:/group-sms/error?campaignId={CampaignId}&reason=emptyR
 
 ## 테스트 순서
 
+아래는 단축어 자체의 빠른 확인 순서다. 전체 발송 Gate, 시험 데이터, 합격/중단 조건과 결과 기록은 `docs/group-sms-test-plan.md`를 따른다.
+
 1. 앱의 `단체문자` 탭에서 테스트 번호 1개 또는 2개 입력
 2. 번호당 반복 횟수 1~3회로 시작
 3. 딜레이는 `꺼짐`으로 시작

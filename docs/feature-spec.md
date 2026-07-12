@@ -152,6 +152,7 @@
   - iOS 정책상 단축어는 사용자가 Shortcuts 앱에서 직접 추가해야 하며 앱이 조용히 자동 설치하지 않습니다.
   - `SoheeGroupSMS` 단축어 상세 설계는 `docs/group-sms-shortcut.md`에서 관리합니다.
   - 공통 캠페인 알고리즘, 첨부파일 확장과 Android 포팅 기준은 `docs/group-sms-implementation-guide.md`에서 관리합니다.
+  - 문자 발송 단계, 테스트 데이터, 합격/중단 조건은 `docs/group-sms-test-plan.md`에서 관리합니다.
   - SKT 기준 일/월 발송량 제한 위험을 줄이기 위해 앱 내부에서 발송 요청 수, 200건 초과일, 캠페인 대상 수를 추적하고 경고합니다.
   - x-callback-url로 앱에 복귀한 시점을 기준으로 `발송 성공`이 아닌 `발송 요청 완료` 로그를 남깁니다.
   - 캠페인/수신자 로그는 로컬 저장과 Google Drive 백업/복원에 포함합니다.

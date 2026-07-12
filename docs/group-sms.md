@@ -14,6 +14,8 @@
 
 구현 알고리즘, 데이터 계약, 첨부파일 확장 및 Android 포팅 기준은 `docs/group-sms-implementation-guide.md`에서 관리한다.
 
+실제 발송 단계, 시험 데이터, 합격/중단 조건과 결과 기록 양식은 `docs/group-sms-test-plan.md`에서 관리한다.
+
 ## 2026-07-12 실기기 검증 현황
 
 - 완료: 앱 payload 생성과 클립보드 전달
@@ -566,6 +568,9 @@ com.lucid47.outboundsales:/group-sms/error?campaignId=...
 
 ### 남은 검증
 
-- 실제 iPhone/iPad에서 `SoheeGroupSMS` 단축어 권한 승인 흐름 확인
-- 실제 통신사 문자앱 전송 확인 단계가 iOS/Shortcuts 버전별로 어떻게 보이는지 확인
+- 고정/랜덤 딜레이와 묶음 휴식의 실제 시간 확인
+- 완료/취소/오류 callback 실기기 확인
+- 사진 1장과 일반 파일 첨부 호환성 확인
 - 50건 이상 장시간 실행 시 화면 잠금, Shortcuts 중단, 발송 지연 체감 검증
+
+상세 시험 순서와 고객 파일럿 진입 조건은 `docs/group-sms-test-plan.md`를 따른다.
