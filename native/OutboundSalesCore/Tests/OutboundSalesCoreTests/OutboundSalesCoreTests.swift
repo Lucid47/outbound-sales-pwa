@@ -262,6 +262,96 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(json.contains("\"fileName\":\"guide.pdf\""))
     }
 
+    func testClassifiesExcludedGroupSmsTargets() {
+        let targets = [
+            GroupMessageTarget(sourceRecordId: "included", displayName: "포함", phoneNumber: "010-1111-2222"),
+            GroupMessageTarget(sourceRecordId: "duplicate", displayName: "중복", phoneNumber: "01011112222"),
+            GroupMessageTarget(sourceRecordId: "invalid", displayName: "오류", phoneNumber: "번호없음"),
+            GroupMessageTarget(sourceRecordId: "manual", displayName: "사용자 제외", phoneNumber: "01033334444"),
+            GroupMessageTarget(sourceRecordId: "recent", displayName: "최근 발송", phoneNumber: "01055556666")
+        ]
+
+        let result = GroupSmsTargetSelector.select(
+            targets: targets,
+            userExcludedSourceRecordIds: ["manual"],
+            recentlyMessagedPhoneNumbers: ["010-5555-6666"]
+        )
+
+        XCTAssertEqual(result.includedTargets.map(\.sourceRecordId), ["included"])
+        XCTAssertEqual(result.excludedCount(for: .duplicatePhone), 1)
+        XCTAssertEqual(result.excludedCount(for: .missingOrInvalidPhone), 1)
+        XCTAssertEqual(result.excludedCount(for: .userExcluded), 1)
+        XCTAssertEqual(result.excludedCount(for: .recentlyMessaged), 1)
+    }
+
+    func testBuildsGroupSmsPreflightSummary() {
+        let selection = GroupSmsTargetSelector.select(
+            targets: [
+                GroupMessageTarget(sourceRecordId: "one", displayName: "한명", phoneNumber: "01011112222")
+            ]
+        )
+        let recipients = [
+            GroupSmsRecipient(
+                id: "recipient-1",
+                displayName: "한명",
+                phoneNumber: "01011112222",
+                messageBody: "안내 문자",
+                orderIndex: 0,
+                plannedDelaySeconds: 4
+            )
+        ]
+        let attachments = [
+            GroupSmsAttachment(
+                id: "photo-1",
+                kind: .photo,
+                fileName: "photo.jpg",
+                contentType: "image/jpeg",
+                byteCount: 1_024,
+                orderIndex: 0,
+                localReference: "campaign/photo.jpg"
+            )
+        ]
+
+        let summary = GroupSmsPreflightEvaluator.evaluate(
+            selection: selection,
+            recipients: recipients,
+            messageTemplate: "안내 문자",
+            attachments: attachments,
+            automationReadiness: .ready
+        )
+
+        XCTAssertTrue(summary.canLaunch)
+        XCTAssertEqual(summary.estimatedMessageKind, .mms)
+        XCTAssertEqual(summary.estimatedDurationSeconds, 4)
+        XCTAssertEqual(summary.totalAttachmentBytes, 1_024)
+    }
+
+    func testBlocksPreflightForUnreadyAutomationAndInvalidAttachment() {
+        let selection = GroupSmsTargetSelector.select(targets: [])
+        let invalidAttachment = GroupSmsAttachment(
+            id: "invalid",
+            kind: .file,
+            fileName: "",
+            contentType: "",
+            byteCount: 0,
+            orderIndex: 0,
+            localReference: ""
+        )
+
+        let summary = GroupSmsPreflightEvaluator.evaluate(
+            selection: selection,
+            recipients: [],
+            messageTemplate: "",
+            attachments: [invalidAttachment],
+            automationReadiness: .installedNeedsTest
+        )
+
+        XCTAssertFalse(summary.canLaunch)
+        XCTAssertTrue(summary.blockingReasons.contains(.noRecipients))
+        XCTAssertTrue(summary.blockingReasons.contains(.automationNotReady))
+        XCTAssertTrue(summary.blockingReasons.contains(.invalidAttachments))
+    }
+
     func testBuildsDenseOCRRowsWithoutMergingAdjacentCustomers() {
         let boxes = [
             ocrBox("김소현", x: 0.10, y: 0.10),

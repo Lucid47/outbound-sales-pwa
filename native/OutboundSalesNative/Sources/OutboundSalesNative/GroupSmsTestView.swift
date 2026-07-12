@@ -27,6 +27,8 @@ struct GroupSmsTestView: View {
     @AppStorage("groupSmsShortcutInstallURL") private var shortcutInstallURLText = ""
     @AppStorage("groupSmsShortcutVerified") private var shortcutVerified = false
     @AppStorage("groupSmsShortcutVerifiedAt") private var shortcutVerifiedAt = ""
+    @AppStorage("groupSmsShortcutVerifiedVersion") private var shortcutVerifiedVersion = ""
+    @AppStorage("groupSmsAutomationReadiness") private var automationReadinessRaw = GroupSmsAutomationReadiness.notInstalled.rawValue
     @State private var composeMode: GroupSmsComposeMode = .customers
     @State private var targetScope: GroupSmsTargetScope = .selectedList
     @State private var excludedCustomerIds = Set<String>()
@@ -50,6 +52,7 @@ struct GroupSmsTestView: View {
     @State private var pendingPayloadJSON = ""
     @State private var pendingShortcutURL: URL?
     @State private var pendingCampaignId = ""
+    @State private var showingShortcutTestConfirmation = false
 
     private var normalizedPhones: [String] {
         GroupSmsBuilder.normalizedPhoneNumbers(phoneNumbersText)
@@ -71,10 +74,33 @@ struct GroupSmsTestView: View {
         targetCandidates.filter { !excludedCustomerIds.contains($0.id) && hasDialablePhone($0.phoneNumber) }
     }
 
+    private var customerTargetSelection: GroupSmsTargetSelectionResult {
+        GroupSmsTargetSelector.select(
+            targets: targetCandidates.map { customer in
+                GroupMessageTarget(
+                    sourceRecordId: customer.id,
+                    displayName: customer.name,
+                    phoneNumber: customer.phoneNumber
+                )
+            },
+            userExcludedSourceRecordIds: excludedCustomerIds,
+            removesDuplicatePhones: removesDuplicatePhones
+        )
+    }
+
+    private var automationReadiness: GroupSmsAutomationReadiness {
+        let stored = GroupSmsAutomationReadiness(rawValue: automationReadinessRaw) ?? .notInstalled
+        if stored == .ready,
+           shortcutVerifiedVersion != Self.transportConfiguration.shortcutVersion {
+            return .updateRequired
+        }
+        return stored
+    }
+
     private var totalCount: Int {
         switch composeMode {
         case .customers:
-            return selectedCustomers.count
+            return customerTargetSelection.includedTargets.count
         case .test:
             return normalizedPhones.count * max(0, repeatsPerPhone)
         }
@@ -106,10 +132,10 @@ struct GroupSmsTestView: View {
 
                 Section("단축어 설치") {
                     HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: shortcutVerified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(shortcutVerified ? .green : .orange)
+                        Image(systemName: readinessIcon)
+                            .foregroundStyle(readinessColor)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(shortcutVerified ? "단축어 확인됨" : "단축어 확인 필요")
+                            Text(readinessTitle)
                                 .font(.headline)
                             Text("필수 단축어: \(Self.transportConfiguration.shortcutName) · v\(Self.transportConfiguration.shortcutVersion)")
                                 .font(.caption)
@@ -134,7 +160,13 @@ struct GroupSmsTestView: View {
                     Button {
                         openShortcutForVerification()
                     } label: {
-                        Label("설치 확인 테스트", systemImage: "checkmark.circle")
+                        Label("단축어 열기 확인", systemImage: "checkmark.circle")
+                    }
+
+                    Button {
+                        showingShortcutTestConfirmation = true
+                    } label: {
+                        Label("본인 번호 텍스트 시험 통과 기록", systemImage: "checkmark.shield")
                     }
 
                     Button {
@@ -310,7 +342,18 @@ struct GroupSmsTestView: View {
                 }
             }
             .navigationTitle("단체문자")
-            .onAppear(perform: applyDefaultTemplateIfNeeded)
+            .onAppear {
+                migrateAutomationReadinessIfNeeded()
+                applyDefaultTemplateIfNeeded()
+            }
+            .alert("텍스트 시험을 통과했습니까?", isPresented: $showingShortcutTestConfirmation) {
+                Button("통과로 기록") {
+                    markShortcutTextTestPassed()
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("본인 번호로 실제 문자를 보내 수신까지 확인한 경우에만 통과로 기록하세요.")
+            }
             .confirmationDialog("\(totalCount)건을 Shortcuts로 넘길까요?", isPresented: $showingRunConfirmation) {
                 Button("단축어 실행") {
                     runPendingShortcut()
@@ -332,7 +375,12 @@ struct GroupSmsTestView: View {
             }
             Toggle("중복 전화번호 제거", isOn: $removesDuplicatePhones)
             LabeledContent("후보 고객", value: "\(targetCandidates.count)명")
-            LabeledContent("발송 가능", value: "\(selectedCustomers.count)명")
+            LabeledContent("발송 가능", value: "\(customerTargetSelection.includedTargets.count)명")
+            if customerTargetSelection.excludedTargets.isEmpty == false {
+                LabeledContent("사용자 제외", value: "\(customerTargetSelection.excludedCount(for: .userExcluded))명")
+                LabeledContent("번호 없음/오류", value: "\(customerTargetSelection.excludedCount(for: .missingOrInvalidPhone))명")
+                LabeledContent("중복 번호", value: "\(customerTargetSelection.excludedCount(for: .duplicatePhone))명")
+            }
             if targetCandidates.isEmpty {
                 Text("선택한 범위에 고객이 없습니다.")
                     .font(.caption)
@@ -436,6 +484,10 @@ struct GroupSmsTestView: View {
     }
 
     private func prepareShortcutRun() {
+        guard automationReadiness == .ready else {
+            statusMessage = "단축어 텍스트 시험을 먼저 완료하세요. 현재 상태: \(readinessTitle)"
+            return
+        }
         do {
             let recipients = try buildRecipients()
             let campaignId = UUID().uuidString
@@ -511,14 +563,32 @@ struct GroupSmsTestView: View {
         }
         openURL(url) { accepted in
             if accepted {
-                shortcutVerified = true
-                shortcutVerifiedAt = Self.statusDateFormatter.string(from: Date())
-                statusMessage = "\(Self.transportConfiguration.shortcutName) 단축어 열기를 요청했습니다. Shortcuts에서 단축어가 열리면 설치된 상태입니다."
+                shortcutVerified = false
+                automationReadinessRaw = GroupSmsAutomationReadiness.installedNeedsTest.rawValue
+                statusMessage = "\(Self.transportConfiguration.shortcutName) 단축어 열기를 요청했습니다. 열기 성공은 설치 확인일 뿐 실제 문자 권한 시험 완료를 뜻하지 않습니다."
             } else {
                 shortcutVerified = false
+                automationReadinessRaw = GroupSmsAutomationReadiness.notInstalled.rawValue
                 statusMessage = "Shortcuts에서 \(Self.transportConfiguration.shortcutName) 단축어를 열지 못했습니다. 설치 링크로 먼저 추가하세요."
             }
         }
+    }
+
+    private func markShortcutTextTestPassed() {
+        shortcutVerified = true
+        shortcutVerifiedAt = Self.statusDateFormatter.string(from: Date())
+        shortcutVerifiedVersion = Self.transportConfiguration.shortcutVersion
+        automationReadinessRaw = GroupSmsAutomationReadiness.ready.rawValue
+        statusMessage = "본인 번호 텍스트 시험 통과를 기록했습니다."
+    }
+
+    private func migrateAutomationReadinessIfNeeded() {
+        guard shortcutVerified,
+              automationReadinessRaw == GroupSmsAutomationReadiness.notInstalled.rawValue else { return }
+        shortcutVerifiedVersion = shortcutVerifiedVersion.isEmpty
+            ? Self.transportConfiguration.shortcutVersion
+            : shortcutVerifiedVersion
+        automationReadinessRaw = GroupSmsAutomationReadiness.ready.rawValue
     }
 
     private func copyShortcutRecipe() {
@@ -569,7 +639,7 @@ struct GroupSmsTestView: View {
     private func targetDescription() -> String {
         switch composeMode {
         case .customers:
-            return "\(targetScope.rawValue) · \(selectedCustomers.count)명"
+            return "\(targetScope.rawValue) · \(customerTargetSelection.includedTargets.count)명"
         case .test:
             return "반복 테스트 · \(normalizedPhones.count)개 번호"
         }
@@ -597,6 +667,36 @@ struct GroupSmsTestView: View {
             return .orange
         case .draft, .unknown:
             return .secondary
+        }
+    }
+
+    private var readinessTitle: String {
+        switch automationReadiness {
+        case .notInstalled: return "단축어 미설치"
+        case .installedNeedsTest: return "설치됨 · 텍스트 시험 필요"
+        case .messagePermissionRequired: return "문자 권한 필요"
+        case .attachmentPermissionRequired: return "첨부 권한 필요"
+        case .ready: return "텍스트 자동화 사용 가능"
+        case .updateRequired: return "단축어 업데이트 필요"
+        case .unavailable: return "이 기기에서 사용 불가"
+        }
+    }
+
+    private var readinessIcon: String {
+        switch automationReadiness {
+        case .ready: return "checkmark.seal.fill"
+        case .notInstalled, .unavailable: return "xmark.octagon.fill"
+        case .installedNeedsTest, .messagePermissionRequired, .attachmentPermissionRequired, .updateRequired:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var readinessColor: Color {
+        switch automationReadiness {
+        case .ready: return .green
+        case .notInstalled, .unavailable: return .red
+        case .installedNeedsTest, .messagePermissionRequired, .attachmentPermissionRequired, .updateRequired:
+            return .orange
         }
     }
 

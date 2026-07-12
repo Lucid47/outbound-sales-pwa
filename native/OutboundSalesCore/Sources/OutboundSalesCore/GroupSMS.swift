@@ -379,25 +379,19 @@ public enum GroupSmsBuilder {
         let template = messageTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !template.isEmpty else { throw GroupSmsBuilderError.emptyMessage }
 
-        var seenPhones = Set<String>()
-        let dialableTargets = targets.compactMap { target -> (GroupMessageTarget, String)? in
-            let phone = cleanPhone(target.phoneNumber)
-            guard hasDialablePhone(phone) else { return nil }
-            if removesDuplicatePhones {
-                guard seenPhones.insert(phone).inserted else { return nil }
-            }
-            return (target, phone)
-        }
-        guard !dialableTargets.isEmpty else { throw GroupSmsBuilderError.noRecipients }
+        let selection = GroupSmsTargetSelector.select(
+            targets: targets,
+            removesDuplicatePhones: removesDuplicatePhones
+        )
+        guard !selection.includedTargets.isEmpty else { throw GroupSmsBuilderError.noRecipients }
 
-        let total = dialableTargets.count
-        return dialableTargets.enumerated().map { index, item in
-            let target = item.0
+        let total = selection.includedTargets.count
+        return selection.includedTargets.enumerated().map { index, target in
             return GroupSmsRecipient(
                 id: idGenerator(),
                 customerId: target.sourceRecordId,
-                displayName: target.displayName.isEmpty ? item.1 : target.displayName,
-                phoneNumber: item.1,
+                displayName: target.displayName.isEmpty ? target.phoneNumber : target.displayName,
+                phoneNumber: target.phoneNumber,
                 messageBody: renderMessage(
                     template,
                     mergeFields: target.mergeFields,
