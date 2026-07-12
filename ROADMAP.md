@@ -50,6 +50,7 @@
   - 상세 계획: `docs/group-sms.md`
   - 구현/Android 포팅 기준: `docs/group-sms-implementation-guide.md`
   - 문자 발송 테스트 플랜: `docs/group-sms-test-plan.md`
+  - 상용 앱 작동 방식/UI/설정 비교: `docs/group-sms-competitor-research.md`
   - 실기기 검증 완료: payload 파싱, 여러 번호/반복 횟수 증가, 확인 없는 1:1 자동 순차 발송
   - 다음 검증: 딜레이, callback, 사진 1장 첨부, iCloud 공유 단축어 배포
 

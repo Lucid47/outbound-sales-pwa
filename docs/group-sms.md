@@ -16,6 +16,8 @@
 
 실제 발송 단계, 시험 데이터, 합격/중단 조건과 결과 기록 양식은 `docs/group-sms-test-plan.md`에서 관리한다.
 
+Reach, Quick Send, BCC Text의 실제 흐름과 공개 화면을 비교한 제품 설계 기준은 `docs/group-sms-competitor-research.md`에서 관리한다.
+
 ## 2026-07-12 실기기 검증 현황
 
 - 완료: 앱 payload 생성과 클립보드 전달
