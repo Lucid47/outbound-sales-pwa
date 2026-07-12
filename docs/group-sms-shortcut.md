@@ -28,6 +28,30 @@
 - 입력 방식: 클립보드 JSON
 - 실행 방식: 앱에서 URL Scheme으로 실행
 - 앱 callback scheme: `com.lucid47.outboundsales`
+- 스크립트형 기준 명세: [`docs/sohee-group-sms.shortcutspec.json`](./sohee-group-sms.shortcutspec.json)
+
+주의: Apple Shortcuts는 iOS에서 바로 가져올 수 있는 공식 텍스트 소스 포맷을 제공하지 않는다. 위 JSON 파일은 단축어를 사람이 검토하고 재작성하기 위한 **프로젝트 기준 명세**이며, 향후 `.shortcut` 파일 생성/서명 또는 iCloud 공유 단축어를 만들 때의 원본으로 사용한다.
+
+## 2026-07-12 실제 iPhone 검증 결과
+
+검증 완료:
+
+- 앱의 `payload만 클립보드에 복사`로 JSON 전달
+- Shortcuts에서 클립보드 JSON을 사전으로 변환
+- `recipients` 반복과 `phoneNumber`/`messageBody` 추출
+- 본인 번호 여러 개와 반복 횟수 증가 시험
+- 수신자마다 1:1 개별 메시지 자동 발송
+- `메시지 보내기`의 실행 시 표시를 끄고 작성 화면 없이 발송
+- 반복 안의 검증용 `알림 보기`를 제거해 건별 확인 없이 발송
+
+아직 검증하지 않음:
+
+- `plannedDelaySeconds`와 `대기` 연결
+- 완료/취소/오류 callback
+- 사진/파일 첨부
+- iCloud 공유 링크를 통한 다른 기기 설치
+
+전체 구현과 Android 포팅 기준은 `docs/group-sms-implementation-guide.md`에서 관리한다.
 
 앱 실행 URL 예:
 
@@ -93,18 +117,18 @@ Shortcuts 앱에서 아래 순서로 액션을 구성한다.
 
 - `PayloadText`가 비어 있으면 오류 callback을 열고 종료한다.
 
-### 2. JSON을 딕셔너리로 변환
+### 2. JSON을 사전으로 변환
 
 액션:
 
 ```text
-입력에서 딕셔너리 가져오기
+입력에서 사전 가져오기
 ```
 
 또는 iOS 버전에 따라:
 
 ```text
-JSON에서 딕셔너리 가져오기
+JSON에서 사전 가져오기
 ```
 
 입력:
@@ -117,19 +141,75 @@ JSON에서 딕셔너리 가져오기
 
 ### 3. payload 기본값 추출
 
-액션:
+여기서 말하는 `campaignId`, `recipients` 등은 단축어 화면에 보이는 버튼 이름이 아니라, 앱이 만든 JSON 안의 **키 이름**이다. `사전 값 가져오기` 액션을 여러 번 추가하고, 각 액션의 `키` 칸에 아래 값을 직접 입력한다.
+
+한글 iPhone에서 찾을 액션 이름:
 
 ```text
-딕셔너리 값 가져오기
+사전 값 가져오기
 ```
 
-추출할 키:
+또는 iOS 버전에 따라 다음처럼 보일 수 있다.
 
-- `campaignId` → `CampaignId`
-- `callbackScheme` → `CallbackScheme`
-- `successPath` → `SuccessPath`
-- `errorPath` → `ErrorPath`
-- `recipients` → `Recipients`
+```text
+사전에서 값 가져오기
+```
+
+#### 3-1. campaignId 꺼내기
+
+액션 하나를 추가한다.
+
+```text
+사전 값 가져오기
+```
+
+설정:
+
+- `키` 또는 `Key`: `campaignId`
+- `사전` 또는 `Dictionary`: 2번에서 만든 `Payload`
+- 결과 변수 이름: `CampaignId`
+
+즉 의미는 “Payload 사전에서 campaignId 값을 꺼내 CampaignId라는 이름으로 쓰겠다”이다.
+
+#### 3-2. callbackScheme 꺼내기
+
+같은 액션을 하나 더 추가한다.
+
+- `키`: `callbackScheme`
+- `사전`: `Payload`
+- 결과 변수 이름: `CallbackScheme`
+
+#### 3-3. successPath 꺼내기
+
+같은 액션을 하나 더 추가한다.
+
+- `키`: `successPath`
+- `사전`: `Payload`
+- 결과 변수 이름: `SuccessPath`
+
+#### 3-4. errorPath 꺼내기
+
+같은 액션을 하나 더 추가한다.
+
+- `키`: `errorPath`
+- `사전`: `Payload`
+- 결과 변수 이름: `ErrorPath`
+
+#### 3-5. recipients 꺼내기
+
+같은 액션을 하나 더 추가한다.
+
+- `키`: `recipients`
+- `사전`: `Payload`
+- 결과 변수 이름: `Recipients`
+
+이 단계가 끝나면 단축어 안에는 다음 변수가 생긴다.
+
+- `CampaignId`: 이번 발송 묶음의 고유 ID
+- `CallbackScheme`: 앱으로 돌아갈 때 쓰는 scheme
+- `SuccessPath`: 완료 URL 경로
+- `ErrorPath`: 오류 URL 경로
+- `Recipients`: 문자 보낼 사람 목록
 
 ### 4. 수신자 반복
 
@@ -145,17 +225,34 @@ JSON에서 딕셔너리 가져오기
 
 반복 안에서 현재 항목:
 
-- `Repeat Item`
+- 한글판 표시: `반복 항목`
 
 ### 5. recipient 필드 추출
 
-반복 안에서 `딕셔너리 값 가져오기` 액션을 사용한다.
+반복 안에서도 `사전 값 가져오기` 액션을 사용한다. 여기서는 `Payload`가 아니라 반복의 현재 항목인 `반복 항목`에서 값을 꺼낸다.
 
-추출할 키:
+반복 안에 아래 액션 3개를 넣는다.
 
-- `phoneNumber` → `PhoneNumber`
-- `messageBody` → `MessageBody`
-- `plannedDelaySeconds` → `DelaySeconds`
+#### 5-1. phoneNumber 꺼내기
+
+- 액션: `사전 값 가져오기`
+- `키`: `phoneNumber`
+- `사전`: `반복 항목`
+- 결과 변수 이름: `PhoneNumber`
+
+#### 5-2. messageBody 꺼내기
+
+- 액션: `사전 값 가져오기`
+- `키`: `messageBody`
+- `사전`: `반복 항목`
+- 결과 변수 이름: `MessageBody`
+
+#### 5-3. plannedDelaySeconds 꺼내기
+
+- 액션: `사전 값 가져오기`
+- `키`: `plannedDelaySeconds`
+- `사전`: `반복 항목`
+- 결과 변수 이름: `DelaySeconds`
 
 ### 6. 메시지 보내기
 
@@ -172,11 +269,14 @@ JSON에서 딕셔너리 가져오기
 - 수신자는 항상 1명만 지정
 - `Show When Run` 또는 실행 시 표시 옵션이 있으면 꺼짐으로 설정
 
+한글판에서 `받는 사람`을 짧게 누르면 연락처 선택기가 열린다. 동적 번호를 넣으려면 `받는 사람`을 길게 누르고 `변수 선택`을 선택한 뒤 `PhoneNumber` 변수를 지정한다.
+
 주의:
 
 - iOS/Shortcuts 버전에 따라 최초 실행 시 메시지 전송 권한 확인이 뜰 수 있다.
 - 사용자가 단축어 권한을 허용하지 않으면 자동 발송처럼 동작하지 않을 수 있다.
 - 여러 번호를 한 번에 넣으면 그룹 메시지가 될 수 있으므로 반드시 1명씩 반복한다.
+- 검증용 `텍스트`와 `알림 보기`가 반복 안에 남아 있으면 발송 횟수만큼 확인 버튼을 눌러야 한다. 자동 반복 검증 후에는 두 동작을 제거한다.
 
 ### 7. 딜레이 적용
 
@@ -264,6 +364,8 @@ com.lucid47.outboundsales:/group-sms/error?campaignId={CampaignId}&reason=emptyR
 5. Shortcuts 앱에서 `SoheeGroupSMS`를 수동 실행
 6. 정상 작동 확인 후 앱에서 `클립보드에 payload 저장 후 단축어 실행`
 7. 5건, 10건, 30건 순서로 늘려 테스트
+
+2026-07-12에는 본인 번호 여러 개와 반복 횟수 증가 시험까지 성공했다. 다음 시험은 딜레이와 callback이며, 고객 대상 대량 발송 전에 반드시 본인 번호로 완료한다.
 
 권장 최초 테스트:
 

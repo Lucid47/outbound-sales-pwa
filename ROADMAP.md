@@ -48,6 +48,9 @@
   - SKT 기준 일 500건 제한, 일 200건 초과 반복 사용 리스크를 반영해 앱 내부 발송량 경고/차단 기준을 설계
   - x-callback-url 복귀 시 캠페인/고객별 `발송 요청` 로그 저장
   - 상세 계획: `docs/group-sms.md`
+  - 구현/Android 포팅 기준: `docs/group-sms-implementation-guide.md`
+  - 실기기 검증 완료: payload 파싱, 여러 번호/반복 횟수 증가, 확인 없는 1:1 자동 순차 발송
+  - 다음 검증: 딜레이, callback, 사진 1장 첨부, iCloud 공유 단축어 배포
 
 ## 중기 기능
 

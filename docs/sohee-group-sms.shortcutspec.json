@@ -1,0 +1,224 @@
+{
+  "name": "SoheeGroupSMS",
+  "version": "0.1",
+  "purpose": "Read the JSON payload copied by the Sohee app and send one SMS/iMessage request per recipient through Apple Shortcuts.",
+  "installability": {
+    "directImportFromThisFile": false,
+    "reason": "Apple Shortcuts does not provide an official plain-text shortcut source format that iOS can import directly. This file is the canonical source spec for manual creation, review, and future generation of a signed .shortcut file or iCloud shared shortcut.",
+    "recommendedDistribution": [
+      "Create or update the shortcut once in Apple Shortcuts.",
+      "Share it as an iCloud Shortcut link or exported shortcut file.",
+      "Store the iCloud link in the app's Group SMS setup screen."
+    ]
+  },
+  "input": {
+    "source": "clipboard",
+    "format": "json",
+    "requiredRootKeys": [
+      "campaignId",
+      "callbackScheme",
+      "successPath",
+      "errorPath",
+      "recipients"
+    ],
+    "requiredRecipientKeys": [
+      "phoneNumber",
+      "messageBody",
+      "plannedDelaySeconds"
+    ]
+  },
+  "verifiedOnDevice": {
+    "date": "2026-07-12",
+    "platform": "physical iPhone",
+    "passed": [
+      "clipboard JSON parsing",
+      "phoneNumber and messageBody extraction",
+      "one-recipient message sending",
+      "multiple phone numbers",
+      "increased repeat counts",
+      "automatic sequential sending without per-message confirmation"
+    ],
+    "notYetVerified": [
+      "plannedDelaySeconds wait action",
+      "complete/cancel/error callbacks",
+      "photo or file attachments",
+      "iCloud shared shortcut installation"
+    ]
+  },
+  "variables": [
+    {
+      "name": "Payload",
+      "type": "dictionary",
+      "from": "clipboard json"
+    },
+    {
+      "name": "CampaignId",
+      "type": "text",
+      "from": "Payload.campaignId"
+    },
+    {
+      "name": "Recipients",
+      "type": "list<dictionary>",
+      "from": "Payload.recipients"
+    },
+    {
+      "name": "PhoneNumber",
+      "type": "text",
+      "from": "RepeatItem.phoneNumber"
+    },
+    {
+      "name": "MessageBody",
+      "type": "text",
+      "from": "RepeatItem.messageBody"
+    },
+    {
+      "name": "DelaySeconds",
+      "type": "number",
+      "from": "RepeatItem.plannedDelaySeconds"
+    }
+  ],
+  "shortcutActionsKo": [
+    {
+      "step": 1,
+      "action": "클립보드 가져오기",
+      "outputMeaning": "PayloadText"
+    },
+    {
+      "step": 2,
+      "action": "클립보드에서 사전 가져오기",
+      "outputVariable": "Payload",
+      "notes": [
+        "iOS 버전에 따라 '입력에서 사전 가져오기' 또는 'JSON에서 사전 가져오기'처럼 보일 수 있다.",
+        "화면에 '클립보드에서 사전 가져오기'로 보이면 정상이다."
+      ]
+    },
+    {
+      "step": 3,
+      "action": "사전 값 가져오기",
+      "dictionary": "Payload",
+      "key": "campaignId",
+      "setVariable": "CampaignId"
+    },
+    {
+      "step": 4,
+      "action": "사전 값 가져오기",
+      "dictionary": "Payload",
+      "key": "recipients",
+      "setVariable": "Recipients"
+    },
+    {
+      "step": 5,
+      "action": "각 항목 반복",
+      "repeatList": "Recipients",
+      "repeatItemNameInShortcuts": "반복 항목",
+      "children": [
+        {
+          "action": "사전 값 가져오기",
+          "dictionary": "반복 항목",
+          "key": "phoneNumber",
+          "setVariable": "PhoneNumber"
+        },
+        {
+          "action": "사전 값 가져오기",
+          "dictionary": "반복 항목",
+          "key": "messageBody",
+          "setVariable": "MessageBody"
+        },
+        {
+          "action": "사전 값 가져오기",
+          "dictionary": "반복 항목",
+          "key": "plannedDelaySeconds",
+          "setVariable": "DelaySeconds"
+        },
+        {
+          "action": "메시지 보내기",
+          "message": "MessageBody",
+          "recipient": "PhoneNumber",
+          "recipientCountRule": "Always send to exactly one recipient in the current repeat item.",
+          "showWhenRun": false,
+          "koreanUiNotes": [
+            "'받는 사람'을 짧게 누르면 연락처 선택기가 열린다.",
+            "'받는 사람'을 길게 누르고 '변수 선택'을 선택한 뒤 PhoneNumber를 지정한다.",
+            "자동 반복 발송에서는 검증용 '텍스트'와 '알림 보기'를 반복 안에서 제거한다."
+          ]
+        },
+        {
+          "action": "조건",
+          "condition": "DelaySeconds > 0",
+          "children": [
+            {
+              "action": "대기",
+              "seconds": "DelaySeconds"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "step": 6,
+      "action": "텍스트",
+      "text": "com.lucid47.outboundsales:/group-sms/complete?campaignId=${CampaignId}",
+      "outputMeaning": "CompleteCallbackURL"
+    },
+    {
+      "step": 7,
+      "action": "URL 열기",
+      "url": "CompleteCallbackURL"
+    }
+  ],
+  "validationOnlyVariant": {
+    "name": "SoheeGroupSMS-검증용",
+    "difference": "Replace the '메시지 보내기' action with a '결과 보기' or '알림 보기' action that displays PhoneNumber and MessageBody. Use this before real SMS testing.",
+    "displayText": "전화번호: ${PhoneNumber}\n문자내용: ${MessageBody}"
+  },
+  "testPlan": [
+    {
+      "phase": 1,
+      "name": "Payload read test",
+      "recommendedRecipientCount": 1,
+      "sendRealMessage": false,
+      "expectedResult": "Shortcut displays PhoneNumber and MessageBody without sending."
+    },
+    {
+      "phase": 2,
+      "name": "One real message to user's own second number",
+      "recommendedRecipientCount": 1,
+      "sendRealMessage": true,
+      "expectedResult": "One message is created/sent to exactly one recipient."
+    },
+    {
+      "phase": 3,
+      "name": "Repeated test to user's own numbers",
+      "recommendedRecipientCount": "2-3",
+      "sendRealMessage": true,
+      "expectedResult": "Messages are sent one by one without creating a group chat.",
+      "status": "passed-on-physical-iphone-2026-07-12"
+    },
+    {
+      "phase": 4,
+      "name": "Delay and callback test",
+      "recommendedRecipientCount": 2,
+      "sendRealMessage": true,
+      "expectedResult": "Each planned delay is applied and the app receives the correct completion/cancel/error callback.",
+      "status": "not-yet-verified"
+    },
+    {
+      "phase": 5,
+      "name": "Attachment transport test",
+      "recommendedRecipientCount": 1,
+      "sendRealMessage": true,
+      "expectedResult": "One selected photo is delivered with or alongside the expected body without changing the recipient count.",
+      "status": "not-yet-verified"
+    }
+  ],
+  "simulatorSupport": {
+    "canTestAppPayloadGeneration": true,
+    "canTestShortcutRealSmsDelivery": false,
+    "canTestCarrierPolicy": false,
+    "notes": [
+      "The simulator can be useful for app UI and payload creation.",
+      "Real SMS/iMessage sending, carrier limits, and recipient delivery must be validated on a physical iPhone with the user's phone numbers.",
+      "Shortcuts behavior on simulator may differ from a real device and should not be treated as final validation."
+    ]
+  }
+}

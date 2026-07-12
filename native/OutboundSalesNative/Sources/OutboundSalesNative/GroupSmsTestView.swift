@@ -619,19 +619,50 @@ struct GroupSmsTestView: View {
     단축어 이름:
     \(GroupSmsBuilder.shortcutName)
 
-    입력:
-    - Shortcut Input 또는 클립보드 텍스트
-    - JSON 필드: campaignId, callbackScheme, successPath, cancelPath, errorPath, recipients
-    - recipient 필드: phoneNumber, messageBody, plannedDelaySeconds
+    한글 iPhone 기준 액션 이름:
+    - Dictionary는 한글 단축어에서 "사전"으로 표시된다.
+    - "딕셔너리 값 가져오기"가 아니라 "사전 값 가져오기" 또는 "사전에서 값 가져오기"를 찾는다.
 
     권장 액션 순서:
-    1. 클립보드 가져오기
-    2. 입력 텍스트를 JSON/딕셔너리로 변환
-    3. recipients 가져오기
-    4. 각 recipient 반복
-    5. phoneNumber와 messageBody 추출
-    6. 메시지 보내기 액션 실행, 수신자는 phoneNumber 1명만 지정
-    7. plannedDelaySeconds가 0보다 크면 대기
-    8. 마지막에 com.lucid47.outboundsales:/group-sms/complete?campaignId=... 열기
+    1. "클립보드 가져오기"
+       - 결과를 PayloadText라고 생각하면 된다.
+
+    2. "입력에서 사전 가져오기" 또는 "JSON에서 사전 가져오기"
+       - 입력은 1번의 클립보드 값이다.
+       - 결과를 Payload라고 생각하면 된다.
+
+    3. Payload에서 값 꺼내기
+       "사전 값 가져오기" 액션을 5개 추가한다.
+       각 액션에서 사전은 Payload를 선택하고, 키에는 아래 값을 직접 입력한다.
+       - 키 campaignId -> 결과 CampaignId
+       - 키 callbackScheme -> 결과 CallbackScheme
+       - 키 successPath -> 결과 SuccessPath
+       - 키 errorPath -> 결과 ErrorPath
+       - 키 recipients -> 결과 Recipients
+
+    4. "각 항목 반복"
+       - 반복 대상은 Recipients
+
+    5. 반복 안에서 현재 반복 항목 값 꺼내기
+       "사전 값 가져오기" 액션을 반복 안에 3개 추가한다.
+       각 액션에서 사전은 Payload가 아니라 "반복 항목"을 선택한다.
+       - 키 phoneNumber -> 결과 PhoneNumber
+       - 키 messageBody -> 결과 MessageBody
+       - 키 plannedDelaySeconds -> 결과 DelaySeconds
+
+    6. 반복 안에서 "메시지 보내기"
+       - 메시지: MessageBody
+       - 수신자: PhoneNumber
+       - 수신자는 반드시 1명만 지정
+       - 한글판에서 "받는 사람"을 길게 누르고 "변수 선택"으로 PhoneNumber를 지정
+       - "실행 시 보기" 또는 작성 화면 표시 옵션은 끔
+       - 검증 완료 후 반복 안의 "텍스트"와 "알림 보기"는 제거
+
+    7. 반복 안에서 DelaySeconds가 0보다 크면 "대기"
+       - 대기 시간: DelaySeconds초
+
+    8. 반복이 모두 끝난 뒤 URL 열기
+       - URL 텍스트: com.lucid47.outboundsales:/group-sms/complete?campaignId=CampaignId
+       - 액션: URL 열기
     """
 }
