@@ -69,7 +69,7 @@ Token 저장: access token 장기 저장 안 함
 4. OAuth scope에 아래 권한 등록
 5. OAuth Client 생성
    - Application type: iOS
-   - Name: Outbound Sales iOS 또는 소희가 간다 iOS
+   - Name: 소희야 가자 iOS
    - Bundle ID: com.lucid47.outboundsales
    - App Store ID: 아직 배포 전이면 비워둠
    - Team ID: App Check을 쓸 때 필요, 1차 구현에서는 선택

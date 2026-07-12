@@ -49,6 +49,89 @@ public struct GroupSmsDelaySettings: Codable, Equatable, Sendable {
     }
 }
 
+public struct GroupSmsTransportConfiguration: Codable, Equatable, Sendable {
+    public var shortcutName: String
+    public var shortcutVersion: String
+    public var callbackScheme: String
+    public var successPath: String
+    public var cancelPath: String
+    public var errorPath: String
+
+    public init(
+        shortcutName: String,
+        shortcutVersion: String,
+        callbackScheme: String,
+        successPath: String = "/group-sms/complete",
+        cancelPath: String = "/group-sms/cancel",
+        errorPath: String = "/group-sms/error"
+    ) {
+        self.shortcutName = shortcutName
+        self.shortcutVersion = shortcutVersion
+        self.callbackScheme = callbackScheme
+        self.successPath = successPath
+        self.cancelPath = cancelPath
+        self.errorPath = errorPath
+    }
+}
+
+public struct GroupMessageTarget: Codable, Equatable, Sendable {
+    public var sourceRecordId: String?
+    public var displayName: String
+    public var phoneNumber: String
+    public var mergeFields: [String: String]
+    public var sourceMetadata: [String: String]
+
+    public init(
+        sourceRecordId: String? = nil,
+        displayName: String,
+        phoneNumber: String,
+        mergeFields: [String: String] = [:],
+        sourceMetadata: [String: String] = [:]
+    ) {
+        self.sourceRecordId = sourceRecordId
+        self.displayName = displayName
+        self.phoneNumber = phoneNumber
+        self.mergeFields = mergeFields
+        self.sourceMetadata = sourceMetadata
+    }
+}
+
+public enum GroupSmsAttachmentKind: String, Codable, Sendable {
+    case photo
+    case file
+}
+
+public struct GroupSmsAttachment: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var kind: GroupSmsAttachmentKind
+    public var fileName: String
+    public var contentType: String
+    public var byteCount: Int64
+    public var orderIndex: Int
+    public var checksum: String?
+    public var localReference: String
+
+    public init(
+        id: String,
+        kind: GroupSmsAttachmentKind,
+        fileName: String,
+        contentType: String,
+        byteCount: Int64,
+        orderIndex: Int,
+        checksum: String? = nil,
+        localReference: String
+    ) {
+        self.id = id
+        self.kind = kind
+        self.fileName = fileName
+        self.contentType = contentType
+        self.byteCount = byteCount
+        self.orderIndex = orderIndex
+        self.checksum = checksum
+        self.localReference = localReference
+    }
+}
+
 public struct GroupSmsTestInput: Equatable, Sendable {
     public var phoneNumbers: [String]
     public var repeatsPerPhone: Int
@@ -104,6 +187,7 @@ public struct GroupSmsCampaignPayload: Codable, Equatable, Sendable {
     public var cancelPath: String
     public var errorPath: String
     public var recipients: [GroupSmsRecipient]
+    public var attachments: [GroupSmsAttachment]?
     public var createdAt: Date
 
     public init(
@@ -114,6 +198,7 @@ public struct GroupSmsCampaignPayload: Codable, Equatable, Sendable {
         cancelPath: String,
         errorPath: String,
         recipients: [GroupSmsRecipient],
+        attachments: [GroupSmsAttachment]? = nil,
         createdAt: Date
     ) {
         self.campaignId = campaignId
@@ -123,6 +208,7 @@ public struct GroupSmsCampaignPayload: Codable, Equatable, Sendable {
         self.cancelPath = cancelPath
         self.errorPath = errorPath
         self.recipients = recipients
+        self.attachments = attachments
         self.createdAt = createdAt
     }
 }
@@ -135,6 +221,7 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
     public var messageTemplate: String
     public var status: GroupSmsCampaignStatus
     public var recipients: [GroupSmsRecipient]
+    public var attachments: [GroupSmsAttachment]?
     public var requestedAt: Date?
     public var completedAt: Date?
     public var createdAt: Date
@@ -148,6 +235,7 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
         messageTemplate: String,
         status: GroupSmsCampaignStatus = .draft,
         recipients: [GroupSmsRecipient],
+        attachments: [GroupSmsAttachment]? = nil,
         requestedAt: Date? = nil,
         completedAt: Date? = nil,
         createdAt: Date,
@@ -160,6 +248,7 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
         self.messageTemplate = messageTemplate
         self.status = status
         self.recipients = recipients
+        self.attachments = attachments
         self.requestedAt = requestedAt
         self.completedAt = completedAt
         self.createdAt = createdAt
@@ -191,10 +280,6 @@ public enum GroupSmsBuilderError: Error, Equatable {
 }
 
 public enum GroupSmsBuilder {
-    public static let shortcutName = "SoheeGroupSMS"
-    public static let callbackScheme = "com.lucid47.outboundsales"
-    public static let shortcutVersion = "0.1"
-
     public static func normalizedPhoneNumbers(_ text: String) -> [String] {
         text
             .components(separatedBy: CharacterSet(charactersIn: ",\n "))
@@ -257,30 +342,65 @@ public enum GroupSmsBuilder {
         idGenerator: () -> String = { UUID().uuidString },
         randomInt: (ClosedRange<Int>) -> Int = { Int.random(in: $0) }
     ) throws -> [GroupSmsRecipient] {
+        let targets = customers.map { customer in
+            GroupMessageTarget(
+                sourceRecordId: customer.id,
+                displayName: customer.name,
+                phoneNumber: customer.phoneNumber,
+                mergeFields: [
+                    "고객명": customer.name,
+                    "이름": customer.name,
+                    "연락처": customer.phoneNumber,
+                    "주소": customer.address,
+                    "메모": customer.notes
+                ],
+                sourceMetadata: ["customerListId": customer.customerListId]
+            )
+        }
+
+        return try buildRecipients(
+            targets: targets,
+            messageTemplate: messageTemplate,
+            delaySettings: delaySettings,
+            removesDuplicatePhones: removesDuplicatePhones,
+            idGenerator: idGenerator,
+            randomInt: randomInt
+        )
+    }
+
+    public static func buildRecipients(
+        targets: [GroupMessageTarget],
+        messageTemplate: String,
+        delaySettings: GroupSmsDelaySettings,
+        removesDuplicatePhones: Bool = true,
+        idGenerator: () -> String = { UUID().uuidString },
+        randomInt: (ClosedRange<Int>) -> Int = { Int.random(in: $0) }
+    ) throws -> [GroupSmsRecipient] {
         let template = messageTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !template.isEmpty else { throw GroupSmsBuilderError.emptyMessage }
 
         var seenPhones = Set<String>()
-        let dialableCustomers = customers.compactMap { customer -> (Customer, String)? in
-            let phone = cleanPhone(customer.phoneNumber)
+        let dialableTargets = targets.compactMap { target -> (GroupMessageTarget, String)? in
+            let phone = cleanPhone(target.phoneNumber)
             guard hasDialablePhone(phone) else { return nil }
             if removesDuplicatePhones {
                 guard seenPhones.insert(phone).inserted else { return nil }
             }
-            return (customer, phone)
+            return (target, phone)
         }
-        guard !dialableCustomers.isEmpty else { throw GroupSmsBuilderError.noRecipients }
+        guard !dialableTargets.isEmpty else { throw GroupSmsBuilderError.noRecipients }
 
-        let total = dialableCustomers.count
-        return dialableCustomers.enumerated().map { index, item in
-            GroupSmsRecipient(
+        let total = dialableTargets.count
+        return dialableTargets.enumerated().map { index, item in
+            let target = item.0
+            return GroupSmsRecipient(
                 id: idGenerator(),
-                customerId: item.0.id,
-                displayName: item.0.name.isEmpty ? item.1 : item.0.name,
+                customerId: target.sourceRecordId,
+                displayName: target.displayName.isEmpty ? item.1 : target.displayName,
                 phoneNumber: item.1,
-                messageBody: renderCustomerMessage(
+                messageBody: renderMessage(
                     template,
-                    customer: item.0,
+                    mergeFields: target.mergeFields,
                     sequence: index + 1,
                     total: total
                 ),
@@ -295,20 +415,22 @@ public enum GroupSmsBuilder {
     }
 
     public static func makePayload(
+        configuration: GroupSmsTransportConfiguration,
         campaignId: String = UUID().uuidString,
         campaignTitle: String,
         recipients: [GroupSmsRecipient],
-        createdAt: Date = Date(),
-        callbackScheme: String = Self.callbackScheme
+        attachments: [GroupSmsAttachment] = [],
+        createdAt: Date = Date()
     ) -> GroupSmsCampaignPayload {
         GroupSmsCampaignPayload(
             campaignId: campaignId,
             campaignTitle: campaignTitle,
-            callbackScheme: callbackScheme,
-            successPath: "/group-sms/complete",
-            cancelPath: "/group-sms/cancel",
-            errorPath: "/group-sms/error",
+            callbackScheme: configuration.callbackScheme,
+            successPath: configuration.successPath,
+            cancelPath: configuration.cancelPath,
+            errorPath: configuration.errorPath,
             recipients: recipients,
+            attachments: attachments.isEmpty ? nil : attachments,
             createdAt: createdAt
         )
     }
@@ -322,30 +444,29 @@ public enum GroupSmsBuilder {
     }
 
     public static func shortcutsRunURL(
-        shortcutName: String = Self.shortcutName,
-        campaignId: String,
-        callbackScheme: String = Self.callbackScheme
+        configuration: GroupSmsTransportConfiguration,
+        campaignId: String
     ) -> URL? {
         var components = URLComponents()
         components.scheme = "shortcuts"
         components.host = "x-callback-url"
         components.path = "/run-shortcut"
         components.queryItems = [
-            URLQueryItem(name: "name", value: shortcutName),
+            URLQueryItem(name: "name", value: configuration.shortcutName),
             URLQueryItem(name: "input", value: "clipboard"),
-            URLQueryItem(name: "x-success", value: "\(callbackScheme):/group-sms/complete?campaignId=\(campaignId)"),
-            URLQueryItem(name: "x-cancel", value: "\(callbackScheme):/group-sms/cancel?campaignId=\(campaignId)"),
-            URLQueryItem(name: "x-error", value: "\(callbackScheme):/group-sms/error?campaignId=\(campaignId)")
+            URLQueryItem(name: "x-success", value: "\(configuration.callbackScheme):\(configuration.successPath)?campaignId=\(campaignId)"),
+            URLQueryItem(name: "x-cancel", value: "\(configuration.callbackScheme):\(configuration.cancelPath)?campaignId=\(campaignId)"),
+            URLQueryItem(name: "x-error", value: "\(configuration.callbackScheme):\(configuration.errorPath)?campaignId=\(campaignId)")
         ]
         return components.url
     }
 
-    public static func shortcutsOpenURL(shortcutName: String = Self.shortcutName) -> URL? {
+    public static func shortcutsOpenURL(configuration: GroupSmsTransportConfiguration) -> URL? {
         var components = URLComponents()
         components.scheme = "shortcuts"
         components.host = "open-shortcut"
         components.queryItems = [
-            URLQueryItem(name: "name", value: shortcutName)
+            URLQueryItem(name: "name", value: configuration.shortcutName)
         ]
         return components.url
     }
@@ -429,26 +550,20 @@ public enum GroupSmsBuilder {
             .replacingOccurrences(of: "{반복}", with: "\(repeatIndex)")
     }
 
-    private static func renderCustomerMessage(
+    private static func renderMessage(
         _ template: String,
-        customer: Customer,
+        mergeFields: [String: String],
         sequence: Int,
         total: Int
     ) -> String {
-        template
-            .replacingOccurrences(of: "{고객명}", with: customer.name)
-            .replacingOccurrences(of: "{{고객명}}", with: customer.name)
-            .replacingOccurrences(of: "{이름}", with: customer.name)
-            .replacingOccurrences(of: "{{이름}}", with: customer.name)
-            .replacingOccurrences(of: "{연락처}", with: customer.phoneNumber)
-            .replacingOccurrences(of: "{{연락처}}", with: customer.phoneNumber)
-            .replacingOccurrences(of: "{주소}", with: customer.address)
-            .replacingOccurrences(of: "{{주소}}", with: customer.address)
-            .replacingOccurrences(of: "{메모}", with: customer.notes)
-            .replacingOccurrences(of: "{{메모}}", with: customer.notes)
-            .replacingOccurrences(of: "{순번}", with: String(format: "%03d", sequence))
-            .replacingOccurrences(of: "{{순번}}", with: String(format: "%03d", sequence))
-            .replacingOccurrences(of: "{전체}", with: "\(total)")
-            .replacingOccurrences(of: "{{전체}}", with: "\(total)")
+        var fields = mergeFields
+        fields["순번"] = String(format: "%03d", sequence)
+        fields["전체"] = "\(total)"
+
+        return fields.reduce(template) { rendered, field in
+            rendered
+                .replacingOccurrences(of: "{{\(field.key)}}", with: field.value)
+                .replacingOccurrences(of: "{\(field.key)}", with: field.value)
+        }
     }
 }

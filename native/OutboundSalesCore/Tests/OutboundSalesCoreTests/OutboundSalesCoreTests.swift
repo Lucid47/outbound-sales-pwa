@@ -153,6 +153,11 @@ final class OutboundSalesCoreTests: XCTestCase {
     }
 
     func testEncodesGroupSmsPayloadAndShortcutURL() throws {
+        let configuration = GroupSmsTransportConfiguration(
+            shortcutName: "SoheeGroupSMS",
+            shortcutVersion: "0.1",
+            callbackScheme: "com.lucid47.outboundsales"
+        )
         let recipients = [
             GroupSmsRecipient(
                 id: "recipient-1",
@@ -164,6 +169,7 @@ final class OutboundSalesCoreTests: XCTestCase {
             )
         ]
         let payload = GroupSmsBuilder.makePayload(
+            configuration: configuration,
             campaignId: "campaign-1",
             campaignTitle: "반복 테스트",
             recipients: recipients,
@@ -174,13 +180,86 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(json.contains("\"campaignId\":\"campaign-1\""))
         XCTAssertTrue(json.contains("\"phoneNumber\":\"01011112222\""))
 
-        let url = try XCTUnwrap(GroupSmsBuilder.shortcutsRunURL(campaignId: "campaign-1"))
+        let url = try XCTUnwrap(GroupSmsBuilder.shortcutsRunURL(configuration: configuration, campaignId: "campaign-1"))
         XCTAssertEqual(url.scheme, "shortcuts")
         XCTAssertTrue(url.absoluteString.contains("SoheeGroupSMS"))
         XCTAssertTrue(url.absoluteString.contains("campaign-1"))
 
-        let openURL = try XCTUnwrap(GroupSmsBuilder.shortcutsOpenURL())
+        let openURL = try XCTUnwrap(GroupSmsBuilder.shortcutsOpenURL(configuration: configuration))
         XCTAssertEqual(openURL.absoluteString, "shortcuts://open-shortcut?name=SoheeGroupSMS")
+    }
+
+    func testBuildsProductNeutralGroupSmsTargets() throws {
+        let targets = [
+            GroupMessageTarget(
+                sourceRecordId: "contact-1",
+                displayName: "김소희",
+                phoneNumber: "010-1111-2222",
+                mergeFields: ["이름": "김소희", "지역": "성동구"]
+            )
+        ]
+
+        let recipients = try GroupSmsBuilder.buildRecipients(
+            targets: targets,
+            messageTemplate: "{이름}님 {{지역}} 안내 {순번}/{전체}",
+            delaySettings: GroupSmsDelaySettings(),
+            idGenerator: { "recipient-1" }
+        )
+
+        XCTAssertEqual(recipients.count, 1)
+        XCTAssertEqual(recipients[0].customerId, "contact-1")
+        XCTAssertEqual(recipients[0].phoneNumber, "01011112222")
+        XCTAssertEqual(recipients[0].messageBody, "김소희님 성동구 안내 001/1")
+    }
+
+    func testEncodesMultiplePhotoAndFileAttachments() throws {
+        let configuration = GroupSmsTransportConfiguration(
+            shortcutName: "SoheeGroupSMS",
+            shortcutVersion: "0.1",
+            callbackScheme: "com.lucid47.outboundsales"
+        )
+        let attachments = [
+            GroupSmsAttachment(
+                id: "photo-1",
+                kind: .photo,
+                fileName: "photo-1.heic",
+                contentType: "image/heic",
+                byteCount: 1_024,
+                orderIndex: 0,
+                localReference: "campaign/photo-1.heic"
+            ),
+            GroupSmsAttachment(
+                id: "photo-2",
+                kind: .photo,
+                fileName: "photo-2.jpg",
+                contentType: "image/jpeg",
+                byteCount: 2_048,
+                orderIndex: 1,
+                localReference: "campaign/photo-2.jpg"
+            ),
+            GroupSmsAttachment(
+                id: "file-1",
+                kind: .file,
+                fileName: "guide.pdf",
+                contentType: "application/pdf",
+                byteCount: 4_096,
+                orderIndex: 2,
+                localReference: "campaign/guide.pdf"
+            )
+        ]
+
+        let payload = GroupSmsBuilder.makePayload(
+            configuration: configuration,
+            campaignTitle: "혼합 첨부 시험",
+            recipients: [],
+            attachments: attachments,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let json = try GroupSmsBuilder.encodePayload(payload)
+
+        XCTAssertEqual(payload.attachments?.count, 3)
+        XCTAssertTrue(json.contains("\"fileName\":\"photo-1.heic\""))
+        XCTAssertTrue(json.contains("\"fileName\":\"guide.pdf\""))
     }
 
     func testBuildsDenseOCRRowsWithoutMergingAdjacentCustomers() {

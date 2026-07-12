@@ -35,7 +35,7 @@ struct GroupSmsTestView: View {
     @State private var selectedTemplateId = ""
     @State private var phoneNumbersText = ""
     @State private var repeatsPerPhone = 3
-    @State private var messageTemplate = "소희가 간다 단체문자 테스트 {순번}/{전체}"
+    @State private var messageTemplate = "소희야 가자 단체문자 테스트 {순번}/{전체}"
     @State private var delayMode: GroupSmsDelayMode = .off
     @State private var fixedDelaySeconds = 1
     @State private var minDelaySeconds = 1
@@ -111,7 +111,7 @@ struct GroupSmsTestView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(shortcutVerified ? "단축어 확인됨" : "단축어 확인 필요")
                                 .font(.headline)
-                            Text("필수 단축어: \(GroupSmsBuilder.shortcutName) · v\(GroupSmsBuilder.shortcutVersion)")
+                            Text("필수 단축어: \(Self.transportConfiguration.shortcutName) · v\(Self.transportConfiguration.shortcutVersion)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             if !shortcutVerifiedAt.isEmpty {
@@ -273,7 +273,7 @@ struct GroupSmsTestView: View {
                     }
                     .disabled(totalCount == 0)
 
-                    Text("단축어 이름은 \(GroupSmsBuilder.shortcutName)입니다. 실제 SMS 최종 도달 여부는 앱이 알 수 없고, 앱에는 발송 요청/콜백 상태만 기록됩니다.")
+                    Text("단축어 이름은 \(Self.transportConfiguration.shortcutName)입니다. 실제 SMS 최종 도달 여부는 앱이 알 수 없고, 앱에는 발송 요청/콜백 상태만 기록됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -440,9 +440,9 @@ struct GroupSmsTestView: View {
             let recipients = try buildRecipients()
             let campaignId = UUID().uuidString
             let title = resolvedCampaignTitle()
-            let payload = GroupSmsBuilder.makePayload(campaignId: campaignId, campaignTitle: title, recipients: recipients)
+            let payload = GroupSmsBuilder.makePayload(configuration: Self.transportConfiguration, campaignId: campaignId, campaignTitle: title, recipients: recipients)
             pendingPayloadJSON = try GroupSmsBuilder.encodePayload(payload)
-            pendingShortcutURL = GroupSmsBuilder.shortcutsRunURL(campaignId: payload.campaignId)
+            pendingShortcutURL = GroupSmsBuilder.shortcutsRunURL(configuration: Self.transportConfiguration, campaignId: payload.campaignId)
             pendingCampaignId = campaignId
             lastRecipients = recipients
             state.saveGroupSmsCampaign(
@@ -463,7 +463,7 @@ struct GroupSmsTestView: View {
     private func copyPayloadOnly() {
         do {
             let recipients = try buildRecipients()
-            let payload = GroupSmsBuilder.makePayload(campaignTitle: resolvedCampaignTitle(), recipients: recipients)
+            let payload = GroupSmsBuilder.makePayload(configuration: Self.transportConfiguration, campaignTitle: resolvedCampaignTitle(), recipients: recipients)
             let json = try GroupSmsBuilder.encodePayload(payload)
             copyToClipboard(json)
             lastRecipients = recipients
@@ -505,7 +505,7 @@ struct GroupSmsTestView: View {
     }
 
     private func openShortcutForVerification() {
-        guard let url = GroupSmsBuilder.shortcutsOpenURL() else {
+        guard let url = GroupSmsBuilder.shortcutsOpenURL(configuration: Self.transportConfiguration) else {
             statusMessage = "단축어 확인 URL을 만들지 못했습니다."
             return
         }
@@ -513,10 +513,10 @@ struct GroupSmsTestView: View {
             if accepted {
                 shortcutVerified = true
                 shortcutVerifiedAt = Self.statusDateFormatter.string(from: Date())
-                statusMessage = "\(GroupSmsBuilder.shortcutName) 단축어 열기를 요청했습니다. Shortcuts에서 단축어가 열리면 설치된 상태입니다."
+                statusMessage = "\(Self.transportConfiguration.shortcutName) 단축어 열기를 요청했습니다. Shortcuts에서 단축어가 열리면 설치된 상태입니다."
             } else {
                 shortcutVerified = false
-                statusMessage = "Shortcuts에서 \(GroupSmsBuilder.shortcutName) 단축어를 열지 못했습니다. 설치 링크로 먼저 추가하세요."
+                statusMessage = "Shortcuts에서 \(Self.transportConfiguration.shortcutName) 단축어를 열지 못했습니다. 설치 링크로 먼저 추가하세요."
             }
         }
     }
@@ -552,7 +552,7 @@ struct GroupSmsTestView: View {
     }
 
     private func applyDefaultTemplateIfNeeded() {
-        guard selectedTemplateId.isEmpty, messageTemplate.hasPrefix("소희가 간다 단체문자 테스트") else { return }
+        guard selectedTemplateId.isEmpty, messageTemplate.hasPrefix("소희야 가자 단체문자 테스트") else { return }
         if let template = state.messageTemplates.first(where: { $0.isDefault }) ?? state.messageTemplates.first {
             selectedTemplateId = template.id
             messageTemplate = template.body
@@ -607,17 +607,19 @@ struct GroupSmsTestView: View {
         return formatter
     }()
 
+    private static let transportConfiguration = SoheeGroupSmsProductConfiguration.transport
+
     private static let shortcutRecipe = """
-    SoheeGroupSMS 단축어 v\(GroupSmsBuilder.shortcutVersion)
+    SoheeGroupSMS 단축어 v\(transportConfiguration.shortcutVersion)
 
     목적:
-    - 소희가 간다 앱이 클립보드에 저장한 JSON payload를 읽는다.
+    - 소희야 가자 앱이 클립보드에 저장한 JSON payload를 읽는다.
     - recipients 배열을 순회하며 각 항목을 1명씩 개별 문자로 발송한다.
     - 각 항목의 plannedDelaySeconds 만큼 대기한다.
     - 완료/취소/오류 시 앱 callback URL을 연다.
 
     단축어 이름:
-    \(GroupSmsBuilder.shortcutName)
+    \(transportConfiguration.shortcutName)
 
     한글 iPhone 기준 액션 이름:
     - Dictionary는 한글 단축어에서 "사전"으로 표시된다.

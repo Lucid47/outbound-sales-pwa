@@ -425,7 +425,7 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func handleGroupSmsCallback(url: URL) {
-        guard url.scheme == GroupSmsBuilder.callbackScheme else { return }
+        guard url.scheme == SoheeGroupSmsProductConfiguration.transport.callbackScheme else { return }
         let path = url.path
         guard path.hasPrefix("/group-sms") else { return }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)

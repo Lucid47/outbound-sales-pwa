@@ -11,8 +11,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'favicon-64.png', 'apple-touch-icon.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
-        name: '아웃바운드 영업 도우미',
-        short_name: '영업도우미',
+        name: '소희야 가자',
+        short_name: '소희야 가자',
         description: '고객리스트 import, 오늘 스케줄, 지도, 전화, 문자, 방문 로그를 관리하는 PWA',
         theme_color: '#162032',
         background_color: '#f5f7fb',

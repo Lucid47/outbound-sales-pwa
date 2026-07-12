@@ -1,4 +1,4 @@
-# Native App Port
+# 소희야 가자 Native App
 
 이 폴더는 기존 PWA 기능과 OCR 기능을 iPhone/iPad 네이티브 앱으로 옮기기 위한 작업 공간입니다.
 

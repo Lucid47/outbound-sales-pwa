@@ -129,7 +129,7 @@ export async function updateDriveJsonFile(accessToken: string, fileId: string, p
 
 export async function createVisibleDriveBackup(accessToken: string, payload: JsonPayload) {
   const date = new Date().toISOString().slice(0, 10)
-  return uploadDriveJson(accessToken, `영업도우미-백업-${date}.json`, payload)
+  return uploadDriveJson(accessToken, `소희야-가자-백업-${date}.json`, payload)
 }
 
 async function uploadDriveJson(accessToken: string, name: string, payload: JsonPayload, metadataExtra: Record<string, unknown> = {}) {

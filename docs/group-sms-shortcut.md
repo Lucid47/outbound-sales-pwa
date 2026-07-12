@@ -2,7 +2,7 @@
 
 ## 목적
 
-`SoheeGroupSMS`는 `소희가 간다` 앱이 만든 단체문자 payload를 읽어, 여러 고객에게 단톡방을 만들지 않고 1명씩 순차적으로 문자 발송을 요청하는 iOS Shortcuts 단축어다.
+`SoheeGroupSMS`는 `소희야 가자` 앱이 만든 단체문자 payload를 읽어, 여러 고객에게 단톡방을 만들지 않고 1명씩 순차적으로 문자 발송을 요청하는 iOS Shortcuts 단축어다.
 
 앱은 다음을 담당한다.
 
@@ -78,7 +78,7 @@ shortcuts://x-callback-url/run-shortcut?name=SoheeGroupSMS&input=clipboard&x-suc
       "customerId": null,
       "displayName": "테스트 1",
       "phoneNumber": "01012345678",
-      "messageBody": "소희가 간다 단체문자 테스트 001/010",
+      "messageBody": "소희야 가자 단체문자 테스트 001/010",
       "orderIndex": 0,
       "plannedDelaySeconds": 0
     }
@@ -374,7 +374,7 @@ com.lucid47.outboundsales:/group-sms/error?campaignId={CampaignId}&reason=emptyR
 ```text
 수신번호: 사용자의 보조 번호 1개
 반복 횟수: 1
-본문: 소희가 간다 테스트 {순번}/{전체}
+본문: 소희야 가자 테스트 {순번}/{전체}
 딜레이: 꺼짐
 ```
 
