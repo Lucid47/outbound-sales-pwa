@@ -6,36 +6,52 @@ import UIKit
 import AppKit
 #endif
 
+private enum OutboundSalesRootTab: String {
+    case today
+    case customers
+    case importData
+    case logs
+    case settings
+}
+
 public struct OutboundSalesRootView: View {
     @StateObject private var state = NativeAppState()
+    @AppStorage("selectedRootTab") private var selectedTab = OutboundSalesRootTab.today.rawValue
 
     public init() {}
 
     public var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             TodayView()
                 .environmentObject(state)
                 .tabItem { Label("오늘", systemImage: "calendar") }
+                .tag(OutboundSalesRootTab.today.rawValue)
 
             CustomersView()
                 .environmentObject(state)
                 .tabItem { Label("고객", systemImage: "person.3") }
+                .tag(OutboundSalesRootTab.customers.rawValue)
 
             ImportView()
                 .environmentObject(state)
                 .tabItem { Label("가져오기", systemImage: "square.and.arrow.down") }
+                .tag(OutboundSalesRootTab.importData.rawValue)
 
             LogsView()
                 .environmentObject(state)
                 .tabItem { Label("기록", systemImage: "clock.arrow.circlepath") }
-
-            GroupSmsTestView()
-                .environmentObject(state)
-                .tabItem { Label("단체문자", systemImage: "message.badge") }
+                .tag(OutboundSalesRootTab.logs.rawValue)
 
             SettingsView()
                 .environmentObject(state)
                 .tabItem { Label("설정", systemImage: "gearshape") }
+                .tag(OutboundSalesRootTab.settings.rawValue)
+        }
+        .onAppear {
+            // iOS stores the previous six-tab selection even after the tab is removed.
+            if selectedTab == "groupSms" {
+                selectedTab = OutboundSalesRootTab.customers.rawValue
+            }
         }
         .task {
             await state.performStartupMaintenance()
@@ -93,6 +109,16 @@ struct TodayView: View {
                     } label: {
                         Label("오늘 고객 지도 보기", systemImage: "map")
                     }
+                }
+
+                Section("빠른 실행") {
+                    NavigationLink {
+                        GroupSmsCampaignView(initialTargetScope: .todaySchedule)
+                            .environmentObject(state)
+                    } label: {
+                        Label("오늘 고객에게 단체문자", systemImage: "message.fill")
+                    }
+                    .disabled(state.todayScheduledCustomers.isEmpty)
                 }
             }
             .navigationTitle("오늘")
@@ -192,6 +218,35 @@ struct CustomersView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
+
+                        NavigationLink {
+                            GroupSmsCampaignView(initialTargetScope: .selectedList)
+                                .environmentObject(state)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "message.fill")
+                                    .font(.title3)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("단체문자")
+                                        .font(.headline)
+                                    Text("현재 고객리스트에서 대상 선택")
+                                        .font(.caption)
+                                        .opacity(0.85)
+                                }
+                                Spacer()
+                                Text("\(state.visibleCustomers.count)명")
+                                    .font(.headline)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                            .padding(.horizontal, 14)
+                            .background(Color.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(state.selectedList == nil)
 
                         Picker("필터", selection: $filterMode) {
                             ForEach(CustomerFilterMode.allCases) { mode in
