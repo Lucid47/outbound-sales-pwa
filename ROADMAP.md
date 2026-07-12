@@ -51,6 +51,7 @@
   - 구현/Android 포팅 기준: `docs/group-sms-implementation-guide.md`
   - 문자 발송 테스트 플랜: `docs/group-sms-test-plan.md`
   - 상용 앱 작동 방식/UI/설정 비교: `docs/group-sms-competitor-research.md`
+  - 현재 앱 적용 및 독립 앱 분리 액션플랜: `docs/group-sms-productization-plan.md`
   - 실기기 검증 완료: payload 파싱, 여러 번호/반복 횟수 증가, 확인 없는 1:1 자동 순차 발송
   - 다음 검증: 딜레이, callback, 사진 1장 첨부, iCloud 공유 단축어 배포
 
@@ -115,6 +116,8 @@
 - 단체 문자 고도화
   - iPhone PWA에서는 자동 개별 발송이 어려움
   - 별도 SMS API 서버 또는 네이티브 앱 프로젝트로 분리 검토
+  - `소희가 간다`에서 검증한 Group Messaging Core를 독립 유료 단체문자 앱으로 분리
+  - 독립 앱은 별도 Bundle ID, URL scheme, Shortcuts 배포, 연락처/CSV 저장소, StoreKit 구독을 사용
 
 ## 보류된 요구사항
 

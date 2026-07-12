@@ -151,6 +151,10 @@
   - 앱 안에서 iCloud 단축어 공유 링크를 열어 설치 화면으로 이동하고, `SoheeGroupSMS` 단축어 열기 테스트를 제공합니다.
   - iOS 정책상 단축어는 사용자가 Shortcuts 앱에서 직접 추가해야 하며 앱이 조용히 자동 설치하지 않습니다.
   - `SoheeGroupSMS` 단축어 상세 설계는 `docs/group-sms-shortcut.md`에서 관리합니다.
+  - 제품 UI는 자동화 준비, 대상 선택, 메시지 작성, 발송 전 점검, 발송 진행, 결과와 복구의 6단계로 분리합니다.
+  - 현재 검증용 `GroupSmsTestView`의 긴 단일 Form은 진단 화면으로 유지하고 실제 고객용 캠페인 화면으로 사용하지 않습니다.
+  - 향후 별도 유료 단체문자 앱으로 분리할 수 있도록 캠페인 엔진은 CRM의 `Customer`와 저장 상태에 직접 의존하지 않게 구성합니다.
+  - 제품화 및 적용 액션플랜은 `docs/group-sms-productization-plan.md`에서 관리합니다.
   - 공통 캠페인 알고리즘, 첨부파일 확장과 Android 포팅 기준은 `docs/group-sms-implementation-guide.md`에서 관리합니다.
   - 문자 발송 단계, 테스트 데이터, 합격/중단 조건은 `docs/group-sms-test-plan.md`에서 관리합니다.
   - SKT 기준 일/월 발송량 제한 위험을 줄이기 위해 앱 내부에서 발송 요청 수, 200건 초과일, 캠페인 대상 수를 추적하고 경고합니다.

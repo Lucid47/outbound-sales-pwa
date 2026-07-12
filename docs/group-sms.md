@@ -18,6 +18,8 @@
 
 Reach, Quick Send, BCC Text의 실제 흐름과 공개 화면을 비교한 제품 설계 기준은 `docs/group-sms-competitor-research.md`에서 관리한다.
 
+현재 앱의 6단계 구현 순서와 향후 독립 단체문자 앱으로 분리하기 위한 모듈 경계는 `docs/group-sms-productization-plan.md`에서 관리한다.
+
 ## 2026-07-12 실기기 검증 현황
 
 - 완료: 앱 payload 생성과 클립보드 전달

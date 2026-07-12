@@ -158,6 +158,12 @@ open native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj
 
 Xcode에서 `OutboundSalesiOS` scheme을 선택하면 됩니다. 현재 iOS 시뮬레이터 런타임은 설치되어 있지 않으므로 화면 실행 검증은 실제 기기 연결 또는 시뮬레이터 추가 설치 후 진행합니다.
 
+## Group SMS 개발 기준
+
+현재 `GroupSmsTestView`는 단축어와 발송 payload를 검증하는 진단 화면입니다. 실제 고객용 제품 UI는 자동화 준비, 대상 선택, 메시지 작성, 발송 전 점검, 발송 진행, 결과와 복구의 6단계로 분리합니다.
+
+향후 별도의 유료 단체문자 앱으로 분리할 수 있도록 `GroupSMS.swift`의 공통 엔진은 `Customer`, `NativeAppState`, `SoheeGroupSMS`, `com.lucid47.outboundsales`에 직접 의존하지 않는 구조로 이전합니다. 구체적인 모듈 경계, 단계별 작업과 완료 조건은 `../docs/group-sms-productization-plan.md`를 따릅니다.
+
 ## 로컬 데이터와 Google Drive
 
 네이티브 앱의 1차 로컬 저장은 앱 샌드박스의 Application Support 영역에 보관합니다. 고객리스트/고객/히스토리/스케줄/템플릿 메타데이터는 `native-data.json` 파일에 저장하고, 고객별 사진 기록은 같은 앱 저장소의 `customer-photos/` 폴더에 저장합니다. 고객정보 파일과 사진 파일은 Git에 포함하지 않습니다.

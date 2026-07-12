@@ -74,6 +74,8 @@ Platform message service
 
 공통 엔진은 수신자와 메시지를 결정할 뿐 직접 SMS API를 호출하지 않는다. 실제 발송은 `MessageTransport` 구현체가 담당한다.
 
+향후 독립 단체문자 앱으로 분리할 수 있도록 공통 엔진은 `Customer`, `NativeAppState`, 특정 Bundle ID, 특정 단축어 이름에 의존하지 않는다. 현재 결합 지점의 제거 순서와 제품별 어댑터 구조는 `docs/group-sms-productization-plan.md`를 따른다.
+
 ## 권장 모듈 경계
 
 현재 Swift 프로젝트:
