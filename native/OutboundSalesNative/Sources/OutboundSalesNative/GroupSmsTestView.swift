@@ -74,6 +74,10 @@ struct GroupSmsTestView: View {
         targetCandidates.filter { !excludedCustomerIds.contains($0.id) && hasDialablePhone($0.phoneNumber) }
     }
 
+    private var currentCustomerIds: Set<String> {
+        Set(targetCandidates.map(\.id))
+    }
+
     private var customerTargetSelection: GroupSmsTargetSelectionResult {
         GroupSmsTargetSelector.select(
             targets: targetCandidates.map { customer in
@@ -376,6 +380,23 @@ struct GroupSmsTestView: View {
             Toggle("중복 전화번호 제거", isOn: $removesDuplicatePhones)
             LabeledContent("후보 고객", value: "\(targetCandidates.count)명")
             LabeledContent("발송 가능", value: "\(customerTargetSelection.includedTargets.count)명")
+            HStack(spacing: 10) {
+                Button {
+                    excludedCustomerIds.subtract(currentCustomerIds)
+                } label: {
+                    Label("전체 선택", systemImage: "checkmark.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(currentCustomerIds.isDisjoint(with: excludedCustomerIds))
+
+                Button {
+                    excludedCustomerIds.formUnion(currentCustomerIds)
+                } label: {
+                    Label("전체 해제", systemImage: "circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(currentCustomerIds.isEmpty || currentCustomerIds.isSubset(of: excludedCustomerIds))
+            }
             if customerTargetSelection.excludedTargets.isEmpty == false {
                 LabeledContent("사용자 제외", value: "\(customerTargetSelection.excludedCount(for: .userExcluded))명")
                 LabeledContent("번호 없음/오류", value: "\(customerTargetSelection.excludedCount(for: .missingOrInvalidPhone))명")

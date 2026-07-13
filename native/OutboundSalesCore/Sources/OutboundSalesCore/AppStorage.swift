@@ -11,6 +11,8 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var visitScheduleItems: [VisitScheduleItem]
     public var messageTemplates: [MessageTemplate]
     public var groupSmsCampaigns: [GroupSmsCampaign]
+    public var contactExportBatches: [ContactExportBatch]
+    public var dashboardStatuses: [DashboardStatusDefinition]
     public var selectedListId: String?
     public var savedAt: Date
 
@@ -25,6 +27,8 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         visitScheduleItems: [VisitScheduleItem] = [],
         messageTemplates: [MessageTemplate] = [],
         groupSmsCampaigns: [GroupSmsCampaign] = [],
+        contactExportBatches: [ContactExportBatch] = [],
+        dashboardStatuses: [DashboardStatusDefinition] = [],
         selectedListId: String?,
         savedAt: Date = Date()
     ) {
@@ -38,6 +42,8 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.visitScheduleItems = visitScheduleItems
         self.messageTemplates = messageTemplates
         self.groupSmsCampaigns = groupSmsCampaigns
+        self.contactExportBatches = contactExportBatches
+        self.dashboardStatuses = dashboardStatuses
         self.selectedListId = selectedListId
         self.savedAt = savedAt
     }
@@ -54,6 +60,8 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.visitScheduleItems = try container.decodeIfPresent([VisitScheduleItem].self, forKey: .visitScheduleItems) ?? []
         self.messageTemplates = try container.decodeIfPresent([MessageTemplate].self, forKey: .messageTemplates) ?? []
         self.groupSmsCampaigns = try container.decodeIfPresent([GroupSmsCampaign].self, forKey: .groupSmsCampaigns) ?? []
+        self.contactExportBatches = try container.decodeIfPresent([ContactExportBatch].self, forKey: .contactExportBatches) ?? []
+        self.dashboardStatuses = try container.decodeIfPresent([DashboardStatusDefinition].self, forKey: .dashboardStatuses) ?? []
         self.selectedListId = try container.decodeIfPresent(String.self, forKey: .selectedListId)
         self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt) ?? Date()
     }

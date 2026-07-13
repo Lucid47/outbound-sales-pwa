@@ -22,6 +22,14 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
+			<string>Group SMS Callback</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
 			<string>Google Drive OAuth</string>
 			<key>CFBundleURLSchemes</key>
 			<array>

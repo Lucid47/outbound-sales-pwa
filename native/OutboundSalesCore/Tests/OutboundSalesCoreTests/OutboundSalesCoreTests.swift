@@ -185,6 +185,21 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.contains("SoheeGroupSMS"))
         XCTAssertTrue(url.absoluteString.contains("campaign-1"))
 
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let queryItems = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(
+            queryItems["x-success"],
+            "com.lucid47.outboundsales:/group-sms/complete?campaignId=campaign-1"
+        )
+        XCTAssertEqual(
+            queryItems["x-cancel"],
+            "com.lucid47.outboundsales:/group-sms/cancel?campaignId=campaign-1"
+        )
+        XCTAssertEqual(
+            queryItems["x-error"],
+            "com.lucid47.outboundsales:/group-sms/error?campaignId=campaign-1"
+        )
+
         let openURL = try XCTUnwrap(GroupSmsBuilder.shortcutsOpenURL(configuration: configuration))
         XCTAssertEqual(openURL.absoluteString, "shortcuts://open-shortcut?name=SoheeGroupSMS")
     }
@@ -396,6 +411,11 @@ final class OutboundSalesCoreTests: XCTestCase {
             phoneNumber: "010-1234-5678",
             address: "서울 강남구 테헤란로 152",
             notes: "메모",
+            contactRegistrationStatus: .registered,
+            contactRegistrationOwnership: .createdByApp,
+            contactIdentifier: "contact-1",
+            contactRegisteredAt: now,
+            contactRegisteredName: "#홍길동",
             createdAt: now,
             updatedAt: now
         )
@@ -430,6 +450,27 @@ final class OutboundSalesCoreTests: XCTestCase {
                     updatedAt: now
                 )
             ],
+            contactExportBatches: [
+                ContactExportBatch(
+                    id: "batch-1",
+                    customerListId: list.id,
+                    installationIdentifier: "installation-1",
+                    groupIdentifier: "group-1",
+                    groupName: list.name,
+                    groupCreatedByApp: true,
+                    records: [
+                        ContactExportRecord(
+                            customerId: customer.id,
+                            contactIdentifier: "contact-1",
+                            registeredName: "#홍길동",
+                            normalizedPhone: "01012345678",
+                            ownership: .createdByApp
+                        )
+                    ],
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
             selectedListId: list.id,
             savedAt: now
         )
@@ -438,6 +479,61 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(try store.load(), snapshot)
         try store.delete()
         XCTAssertNil(try store.load())
+    }
+
+    func testDecodesSnapshotBeforeContactOwnershipTracking() throws {
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let snapshot = NativeAppSnapshot(
+            customerLists: [],
+            customers: [
+                Customer(
+                    id: "customer-1",
+                    customerListId: "list-1",
+                    name: "홍길동",
+                    phoneNumber: "010-1234-5678",
+                    address: "서울",
+                    notes: "",
+                    contactRegistrationStatus: .registered,
+                    contactRegistrationOwnership: .createdByApp,
+                    contactIdentifier: "contact-1",
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
+            contactExportBatches: [
+                ContactExportBatch(
+                    id: "batch-1",
+                    customerListId: "list-1",
+                    installationIdentifier: "installation-1",
+                    groupIdentifier: "group-1",
+                    groupName: "테스트",
+                    groupCreatedByApp: true,
+                    records: [],
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
+            selectedListId: nil,
+            savedAt: now
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let encoded = try encoder.encode(snapshot)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "contactExportBatches")
+        if var customers = object["customers"] as? [[String: Any]], !customers.isEmpty {
+            customers[0].removeValue(forKey: "contactRegistrationOwnership")
+            object["customers"] = customers
+        }
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(NativeAppSnapshot.self, from: legacyData)
+
+        XCTAssertTrue(decoded.contactExportBatches.isEmpty)
+        XCTAssertNil(decoded.customers.first?.contactRegistrationOwnership)
+        XCTAssertEqual(decoded.customers.first?.contactRegistrationStatus, .registered)
     }
 
     private func ocrBox(_ text: String, x: Double, y: Double) -> RecognizedTextBox {

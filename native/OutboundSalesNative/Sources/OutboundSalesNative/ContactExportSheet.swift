@@ -18,6 +18,7 @@ struct ContactExportSheet: View {
     @State private var isLoadingPreview = false
     @State private var isExporting = false
     @State private var message: String?
+    @State private var showingCleanup = false
 
     private let service = ContactExportService()
 
@@ -112,6 +113,18 @@ struct ContactExportSheet: View {
                     }
                 }
 
+                Section("등록 연락처 관리") {
+                    Text("앱이 새로 만든 연락처만 확인해 그룹과 함께 정리합니다. 기존 연락처와 다른 그룹에 속한 연락처는 자동으로 보호합니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button(role: .destructive) {
+                        showingCleanup = true
+                    } label: {
+                        Label("등록 연락처 정리", systemImage: "person.crop.circle.badge.minus")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+
                 Section {
                     Button {
                         Task { await exportContacts() }
@@ -127,7 +140,7 @@ struct ContactExportSheet: View {
                     .disabled(isExporting || customers.isEmpty || groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .navigationTitle("연락처 등록")
+            .navigationTitle("연락처 관리")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("닫기") {
@@ -137,6 +150,14 @@ struct ContactExportSheet: View {
             }
             .task {
                 await loadPreview()
+            }
+            .sheet(isPresented: $showingCleanup) {
+                ContactCleanupSheet(
+                    list: list,
+                    customers: customers,
+                    groupName: groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? list.name : groupName
+                )
+                .environmentObject(state)
             }
         }
     }
@@ -171,13 +192,188 @@ struct ContactExportSheet: View {
         defer { isExporting = false }
 
         do {
-            let result = try await service.export(customers: customers, options: exportOptions)
-            state.markContactExportResults(result.customerResults)
+            let result = try await service.export(customers: customers, customerListId: list.id, options: exportOptions)
+            state.recordContactExport(result)
             summary = result
             message = "연락처 등록이 완료되었습니다."
             preview = try? await service.preview(customers: customers)
         } catch {
             message = error.localizedDescription
         }
+    }
+}
+
+private struct ContactCleanupSheet: View {
+    @EnvironmentObject private var state: NativeAppState
+    @Environment(\.dismiss) private var dismiss
+
+    let list: CustomerList
+    let customers: [Customer]
+    let groupName: String
+
+    @State private var mode: ContactCleanupMode = .appCreatedContactsAndGroup
+    @State private var preview: ContactCleanupPreview?
+    @State private var isLoading = false
+    @State private var isDeleting = false
+    @State private var message: String?
+    @State private var showingConfirmation = false
+
+    private let service = ContactCleanupService()
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("삭제 방식") {
+                    Picker("삭제 방식", selection: $mode) {
+                        ForEach(ContactCleanupMode.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
+
+                if isLoading {
+                    Section {
+                        ProgressView("연락처 소유권 확인 중...")
+                    }
+                } else if let preview {
+                    Section("삭제 미리보기") {
+                        LabeledContent("삭제할 앱 생성 연락처", value: "\(mode == .appCreatedContactsAndGroup ? preview.eligibleContacts.count : 0)명")
+                        LabeledContent("삭제할 앱 생성 그룹", value: "\(preview.groupCount)개")
+                        if preview.legacyCandidateCount > 0 {
+                            LabeledContent("과거 등록분 확인", value: "\(preview.legacyCandidateCount)명")
+                        }
+                    }
+
+                    Section("자동 보호") {
+                        LabeledContent("기존 연락처", value: "\(preview.protectedExistingCount)명")
+                        LabeledContent("다른 그룹에도 소속", value: "\(preview.otherGroupCount)명")
+                        LabeledContent("등록 후 변경됨", value: "\(preview.modifiedCount)명")
+                        LabeledContent("이미 없거나 확인 불가", value: "\(preview.missingCount)명")
+                        if preview.unownedGroupMemberCount > 0 {
+                            LabeledContent("그룹 안의 비소유 연락처", value: "\(preview.unownedGroupMemberCount)명")
+                        }
+                    }
+
+                    if preview.groupCount == 0 {
+                        Section {
+                            Text("앱이 만든 그룹이 이미 삭제되었거나 확인되지 않습니다. 앱이 만든 것으로 검증된 연락처만 정리할 수 있습니다.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+
+                Section {
+                    Text("연락처 삭제는 기본 iCloud 또는 Google 연락처 계정과 다른 기기에도 동기화될 수 있습니다. 앱이 만든 것으로 확인된 연락처만 삭제하며 이 작업은 앱에서 되돌릴 수 없습니다.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if let message {
+                    Section {
+                        Text(message)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        showingConfirmation = true
+                    } label: {
+                        if isDeleting {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label(deleteButtonTitle, systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .disabled(isDeleting || !hasAnythingToDelete)
+                }
+            }
+            .navigationTitle("등록 연락처 정리")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") { dismiss() }
+                }
+            }
+            .task { await loadPreview() }
+            .confirmationDialog(
+                "연락처를 영구 삭제하시겠습니까?",
+                isPresented: $showingConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button(deleteButtonTitle, role: .destructive) {
+                    Task { await cleanup() }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text(confirmationMessage)
+            }
+        }
+    }
+
+    private var hasAnythingToDelete: Bool {
+        guard let preview else { return false }
+        return preview.groupCount > 0 || (mode == .appCreatedContactsAndGroup && !preview.eligibleContacts.isEmpty)
+    }
+
+    private var deleteButtonTitle: String {
+        guard let preview else { return "삭제" }
+        if mode == .groupOnly {
+            return "그룹 \(preview.groupCount)개 삭제"
+        }
+        return "연락처 \(preview.eligibleContacts.count)명과 그룹 \(preview.groupCount)개 삭제"
+    }
+
+    private var confirmationMessage: String {
+        guard let preview else { return "" }
+        if mode == .groupOnly {
+            return "연락처 원본은 유지하고 앱이 만든 그룹 \(preview.groupCount)개만 삭제합니다."
+        }
+        return "앱이 만든 것으로 확인된 연락처 \(preview.eligibleContacts.count)명과 그룹 \(preview.groupCount)개를 삭제합니다. 다른 그룹 소속 및 기존 연락처는 제외됩니다."
+    }
+
+    private func loadPreview() async {
+        guard !isLoading else { return }
+        isLoading = true
+        message = nil
+        defer { isLoading = false }
+        do {
+            preview = try await service.preview(
+                customerListId: list.id,
+                groupName: groupName,
+                customers: currentListCustomers,
+                batches: state.contactExportBatches
+            )
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func cleanup() async {
+        guard !isDeleting else { return }
+        isDeleting = true
+        message = "연락처를 안전하게 다시 확인하는 중..."
+        defer { isDeleting = false }
+        do {
+            let result = try await service.cleanup(
+                mode: mode,
+                customerListId: list.id,
+                groupName: groupName,
+                customers: currentListCustomers,
+                batches: state.contactExportBatches
+            )
+            state.applyContactCleanup(result)
+            await loadPreview()
+            message = "연락처 \(result.deletedContactIdentifiers.count)명과 그룹 \(result.deletedGroupIdentifiers.count)개를 삭제했습니다."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private var currentListCustomers: [Customer] {
+        state.customers.filter { $0.customerListId == list.id }
     }
 }

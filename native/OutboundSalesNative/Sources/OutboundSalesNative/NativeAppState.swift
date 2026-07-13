@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import OutboundSalesCore
+import SwiftUI
 #if os(iOS)
 import UIKit
 #endif
@@ -28,6 +29,8 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var visitScheduleItems: [VisitScheduleItem]
     @Published public private(set) var messageTemplates: [MessageTemplate]
     @Published public private(set) var groupSmsCampaigns: [GroupSmsCampaign]
+    @Published public private(set) var contactExportBatches: [ContactExportBatch]
+    @Published public private(set) var dashboardStatuses: [DashboardStatusDefinition]
     @Published public private(set) var selectedListId: String?
     @Published public var searchText = ""
     @Published public var importMessage = ""
@@ -63,6 +66,8 @@ public final class NativeAppState: ObservableObject {
                 self.visitScheduleItems = snapshot.visitScheduleItems
                 self.messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
                 self.groupSmsCampaigns = snapshot.groupSmsCampaigns
+                self.contactExportBatches = snapshot.contactExportBatches
+                self.dashboardStatuses = snapshot.dashboardStatuses.isEmpty ? Self.defaultDashboardStatuses() : snapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
                 self.selectedListId = snapshot.selectedListId ?? snapshot.customerLists.first?.id
                 self.storageMessage = "저장된 데이터를 불러왔습니다."
                 return
@@ -82,6 +87,8 @@ public final class NativeAppState: ObservableObject {
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
             self.groupSmsCampaigns = []
+            self.contactExportBatches = []
+            self.dashboardStatuses = Self.defaultDashboardStatuses()
             self.selectedListId = seed.lists.first?.id
         } else {
             self.customerLists = []
@@ -93,6 +100,8 @@ public final class NativeAppState: ObservableObject {
             self.visitScheduleItems = []
             self.messageTemplates = Self.defaultTemplates()
             self.groupSmsCampaigns = []
+            self.contactExportBatches = []
+            self.dashboardStatuses = Self.defaultDashboardStatuses()
             self.selectedListId = nil
         }
     }
@@ -374,6 +383,65 @@ public final class NativeAppState: ObservableObject {
         persist()
     }
 
+    public func dashboardStatus(for customer: Customer) -> DashboardStatusDefinition? {
+        let resolvedId = customer.dashboardStatusId ?? dashboardStatuses.first?.id
+        return dashboardStatuses.first { $0.id == resolvedId }
+    }
+
+    public func setDashboardStatus(customerId: String, statusId: String) {
+        guard dashboardStatuses.contains(where: { $0.id == statusId }),
+              let index = customers.firstIndex(where: { $0.id == customerId }) else { return }
+        customers[index].dashboardStatusId = statusId
+        customers[index].updatedAt = Date()
+        persist()
+    }
+
+    public func addDashboardStatus() {
+        guard dashboardStatuses.count < 10 else { return }
+        let palette = Self.dashboardColorPalette
+        dashboardStatuses.append(
+            DashboardStatusDefinition(
+                id: UUID().uuidString,
+                name: "새 상태",
+                colorHex: palette[dashboardStatuses.count % palette.count],
+                orderIndex: dashboardStatuses.count
+            )
+        )
+        persist()
+    }
+
+    public func updateDashboardStatus(id: String, name: String? = nil, colorHex: String? = nil) {
+        guard let index = dashboardStatuses.firstIndex(where: { $0.id == id }) else { return }
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            dashboardStatuses[index].name = trimmed.isEmpty ? "상태 \(index + 1)" : trimmed
+        }
+        if let colorHex {
+            dashboardStatuses[index].colorHex = colorHex
+        }
+        dashboardStatuses[index].updatedAt = Date()
+        persist()
+    }
+
+    public func moveDashboardStatuses(from source: IndexSet, to destination: Int) {
+        dashboardStatuses.move(fromOffsets: source, toOffset: destination)
+        normalizeDashboardStatusOrder()
+        persist()
+    }
+
+    public func removeDashboardStatuses(at offsets: IndexSet) {
+        guard dashboardStatuses.count - offsets.count >= 1 else { return }
+        let removedIds = Set(offsets.compactMap { dashboardStatuses.indices.contains($0) ? dashboardStatuses[$0].id : nil })
+        dashboardStatuses.remove(atOffsets: offsets)
+        guard let fallbackId = dashboardStatuses.first?.id else { return }
+        for index in customers.indices where customers[index].dashboardStatusId.map(removedIds.contains) ?? false {
+            customers[index].dashboardStatusId = fallbackId
+            customers[index].updatedAt = Date()
+        }
+        normalizeDashboardStatusOrder()
+        persist()
+    }
+
     public func saveGroupSmsCampaign(
         id: String,
         title: String,
@@ -524,18 +592,62 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
-    func markContactExportResults(_ results: [ContactExportCustomerResult]) {
+    func recordContactExport(_ summary: ContactExportSummary) {
+        let results = summary.customerResults
         guard !results.isEmpty else { return }
         let now = Date()
         for result in results {
             guard let index = customers.firstIndex(where: { $0.id == result.customerId }) else { continue }
             customers[index].contactRegistrationStatus = result.status
-            customers[index].contactIdentifier = result.contactIdentifier
-            customers[index].contactRegisteredAt = now
-            customers[index].contactRegisteredName = result.registeredName
+            if let contactIdentifier = result.contactIdentifier {
+                if customers[index].contactRegistrationOwnership != .createdByApp ||
+                    customers[index].contactIdentifier != contactIdentifier {
+                    customers[index].contactRegistrationOwnership = result.ownership
+                }
+                customers[index].contactIdentifier = contactIdentifier
+                customers[index].contactRegisteredAt = now
+                customers[index].contactRegisteredName = result.registeredName
+            }
             customers[index].updatedAt = now
         }
+        if let batch = summary.batch {
+            contactExportBatches.append(batch)
+        }
         actionMessage = "연락처 등록 결과를 저장했습니다."
+        persist()
+    }
+
+    func applyContactCleanup(_ summary: ContactCleanupSummary) {
+        let now = Date()
+        let deletedContacts = Set(summary.deletedContactIdentifiers)
+        let deletedGroups = Set(summary.deletedGroupIdentifiers)
+
+        for index in customers.indices where customers[index].contactIdentifier.map(deletedContacts.contains) ?? false {
+            customers[index].contactRegistrationStatus = nil
+            customers[index].contactRegistrationOwnership = nil
+            customers[index].contactIdentifier = nil
+            customers[index].contactRegisteredAt = nil
+            customers[index].contactRegisteredName = nil
+            customers[index].updatedAt = now
+        }
+
+        for index in contactExportBatches.indices {
+            let batchContacts = Set(contactExportBatches[index].records.map(\.contactIdentifier))
+            let deletedInBatch = batchContacts.intersection(deletedContacts)
+            if !deletedInBatch.isEmpty {
+                contactExportBatches[index].deletedContactIdentifiers = Array(
+                    Set(contactExportBatches[index].deletedContactIdentifiers).union(deletedInBatch)
+                ).sorted()
+                contactExportBatches[index].updatedAt = now
+            }
+            if let groupIdentifier = contactExportBatches[index].groupIdentifier,
+               deletedGroups.contains(groupIdentifier) {
+                contactExportBatches[index].groupDeletedAt = now
+                contactExportBatches[index].updatedAt = now
+            }
+        }
+
+        actionMessage = "연락처 \(deletedContacts.count)명과 그룹 \(deletedGroups.count)개를 삭제했습니다."
         persist()
     }
 
@@ -945,6 +1057,8 @@ public final class NativeAppState: ObservableObject {
         visitScheduleItems = snapshot.visitScheduleItems
         messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
         groupSmsCampaigns = snapshot.groupSmsCampaigns
+        contactExportBatches = snapshot.contactExportBatches
+        dashboardStatuses = snapshot.dashboardStatuses.isEmpty ? Self.defaultDashboardStatuses() : snapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
         selectedListId = snapshot.selectedListId ?? customerLists.first?.id
     }
 
@@ -971,6 +1085,7 @@ public final class NativeAppState: ObservableObject {
             campaign.customerListId.map { selectedListIds.contains($0) } ?? false ||
             campaign.recipients.contains { $0.customerId.map { targetCustomerIds.contains($0) } ?? false }
         }
+        contactExportBatches.removeAll { selectedListIds.contains($0.customerListId) }
 
         let restoredLists = remoteSnapshot.customerLists.filter { selectedListIds.contains($0.id) }
         let restoredCustomers = remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }
@@ -990,7 +1105,11 @@ public final class NativeAppState: ObservableObject {
             campaign.customerListId.map { selectedListIds.contains($0) } ?? false ||
             campaign.recipients.contains { $0.customerId.map { restoredCustomerIds.contains($0) } ?? false }
         })
+        contactExportBatches.append(contentsOf: remoteSnapshot.contactExportBatches.filter { selectedListIds.contains($0.customerListId) })
         messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
+        if !remoteSnapshot.dashboardStatuses.isEmpty {
+            dashboardStatuses = remoteSnapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
+        }
         selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
 
         let restoredVisitLogs = remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
@@ -1130,6 +1249,8 @@ public final class NativeAppState: ObservableObject {
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
             groupSmsCampaigns = []
+            contactExportBatches = []
+            dashboardStatuses = Self.defaultDashboardStatuses()
             selectedListId = seed.lists.first?.id
         } else {
             customerLists = []
@@ -1141,6 +1262,8 @@ public final class NativeAppState: ObservableObject {
             visitScheduleItems = []
             messageTemplates = Self.defaultTemplates()
             groupSmsCampaigns = []
+            contactExportBatches = []
+            dashboardStatuses = Self.defaultDashboardStatuses()
             selectedListId = nil
         }
         do {
@@ -1181,6 +1304,8 @@ public final class NativeAppState: ObservableObject {
                 campaign.customerListId.map { filteredListIds.contains($0) } ?? false ||
                 campaign.recipients.contains { $0.customerId.map { filteredCustomerIds.contains($0) } ?? false }
             },
+            contactExportBatches: contactExportBatches.filter { filteredListIds.contains($0.customerListId) },
+            dashboardStatuses: dashboardStatuses,
             selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
     }
@@ -1401,6 +1526,8 @@ public final class NativeAppState: ObservableObject {
         let mergedScheduleItems = mergeById(remote.snapshot.visitScheduleItems, local.snapshot.visitScheduleItems) { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
         let mergedTemplates = mergeById(remote.snapshot.messageTemplates, local.snapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         let mergedGroupSmsCampaigns = mergeById(remote.snapshot.groupSmsCampaigns, local.snapshot.groupSmsCampaigns) { $0.updatedAt < $1.updatedAt }
+        let mergedContactExportBatches = mergeById(remote.snapshot.contactExportBatches, local.snapshot.contactExportBatches) { $0.updatedAt < $1.updatedAt }
+        let mergedDashboardStatuses = mergeById(remote.snapshot.dashboardStatuses, local.snapshot.dashboardStatuses) { $0.updatedAt < $1.updatedAt }
         let snapshot = NativeAppSnapshot(
             customerLists: mergedLists,
             customers: mergedCustomers,
@@ -1411,6 +1538,8 @@ public final class NativeAppState: ObservableObject {
             visitScheduleItems: mergedScheduleItems,
             messageTemplates: mergedTemplates,
             groupSmsCampaigns: mergedGroupSmsCampaigns,
+            contactExportBatches: mergedContactExportBatches,
+            dashboardStatuses: mergedDashboardStatuses.sorted { $0.orderIndex < $1.orderIndex },
             selectedListId: local.snapshot.selectedListId ?? remote.snapshot.selectedListId,
             savedAt: Date()
         )
@@ -1438,6 +1567,33 @@ public final class NativeAppState: ObservableObject {
             }
         }
         return Array(merged.values)
+    }
+
+    private func normalizeDashboardStatusOrder() {
+        for index in dashboardStatuses.indices {
+            dashboardStatuses[index].orderIndex = index
+            dashboardStatuses[index].updatedAt = Date()
+        }
+    }
+
+    public static let dashboardColorPalette = [
+        "5B8FF9", "8067DC", "5D9CEC", "22B8A7", "66B86B",
+        "B3C83F", "F2C94C", "F2994A", "EB6A5B", "8A94A6",
+        "D65DB1", "00A6A6", "7A9E35", "C77D31", "9B6BCE"
+    ]
+
+    private static func defaultDashboardStatuses() -> [DashboardStatusDefinition] {
+        let names = ["신규", "첫 연락 대기", "첫 연락 완료", "니즈 확인", "제안 준비", "제안 완료", "검토 중", "후속 연락", "계약 완료", "보류·종료"]
+        let now = Date()
+        return names.enumerated().map { index, name in
+            DashboardStatusDefinition(
+                id: "dashboard-status-\(index + 1)",
+                name: name,
+                colorHex: dashboardColorPalette[index],
+                orderIndex: index,
+                updatedAt: now
+            )
+        }
     }
 
     private static func loadDriveAccount() -> GoogleDriveAccount? {

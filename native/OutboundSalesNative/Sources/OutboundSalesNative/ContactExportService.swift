@@ -53,6 +53,8 @@ struct ContactExportCustomerResult: Equatable {
     var status: ContactRegistrationStatus
     var contactIdentifier: String?
     var registeredName: String?
+    var normalizedPhone: String
+    var ownership: ContactRegistrationOwnership
 }
 
 struct ContactExportSummary: Equatable {
@@ -63,6 +65,7 @@ struct ContactExportSummary: Equatable {
     var failedCount = 0
     var failures: [ContactExportFailure] = []
     var customerResults: [ContactExportCustomerResult] = []
+    var batch: ContactExportBatch?
 }
 
 enum ContactExportError: LocalizedError {
@@ -83,6 +86,16 @@ enum ContactExportError: LocalizedError {
 final class ContactExportService {
     private let store = CNContactStore()
 
+    static var installationIdentifier: String {
+        let key = "contactExportInstallationIdentifier"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+            return existing
+        }
+        let created = UUID().uuidString
+        UserDefaults.standard.set(created, forKey: key)
+        return created
+    }
+
     func preview(customers: [Customer]) async throws -> ContactExportPreview {
         try await requestAccessIfNeeded()
         let phoneKeys = [CNContactPhoneNumbersKey as CNKeyDescriptor]
@@ -99,9 +112,10 @@ final class ContactExportService {
         )
     }
 
-    func export(customers: [Customer], options: ContactExportOptions) async throws -> ContactExportSummary {
+    func export(customers: [Customer], customerListId: String, options: ContactExportOptions) async throws -> ContactExportSummary {
         try await requestAccessIfNeeded()
-        let group = try ensureGroup(named: options.groupName)
+        let groupResult = try ensureGroup(named: options.groupName)
+        let group = groupResult.group
         let keys: [CNKeyDescriptor] = [
             CNContactIdentifierKey as CNKeyDescriptor,
             CNContactGivenNameKey as CNKeyDescriptor,
@@ -124,7 +138,9 @@ final class ContactExportService {
                         customerId: customer.id,
                         status: .failed,
                         contactIdentifier: nil,
-                        registeredName: registeredName
+                        registeredName: registeredName,
+                        normalizedPhone: normalizedPhone,
+                        ownership: .unknown
                     )
                 )
                 continue
@@ -133,13 +149,16 @@ final class ContactExportService {
             if let existing = existingContactsByPhone[normalizedPhone]?.first {
                 switch options.duplicateHandling {
                 case .skip:
+                    let ownership = resolvedOwnership(for: existing, customer: customer, fallback: .linkedExisting)
                     summary.skippedDuplicateCount += 1
                     summary.customerResults.append(
                         ContactExportCustomerResult(
                             customerId: customer.id,
                             status: .skippedDuplicate,
                             contactIdentifier: existing.identifier,
-                            registeredName: registeredName
+                            registeredName: registeredName,
+                            normalizedPhone: normalizedPhone,
+                            ownership: ownership
                         )
                     )
                 case .update:
@@ -153,12 +172,15 @@ final class ContactExportService {
                         }
                         try store.execute(request)
                         summary.updatedCount += 1
+                        let ownership = resolvedOwnership(for: existing, customer: customer, fallback: .updatedExisting)
                         summary.customerResults.append(
                             ContactExportCustomerResult(
                                 customerId: customer.id,
                                 status: .updated,
                                 contactIdentifier: updated.identifier,
-                                registeredName: registeredName
+                                registeredName: registeredName,
+                                normalizedPhone: normalizedPhone,
+                                ownership: ownership
                             )
                         )
                     } catch {
@@ -170,6 +192,33 @@ final class ContactExportService {
             } else {
                 addNewContact(customer: customer, group: group, registeredName: registeredName, summary: &summary)
             }
+        }
+
+        let records = summary.customerResults.compactMap { result -> ContactExportRecord? in
+            guard let contactIdentifier = result.contactIdentifier,
+                  let registeredName = result.registeredName,
+                  result.ownership != .unknown else { return nil }
+            return ContactExportRecord(
+                customerId: result.customerId,
+                contactIdentifier: contactIdentifier,
+                registeredName: registeredName,
+                normalizedPhone: result.normalizedPhone,
+                ownership: result.ownership
+            )
+        }
+        if !records.isEmpty {
+            let now = Date()
+            summary.batch = ContactExportBatch(
+                id: UUID().uuidString,
+                customerListId: customerListId,
+                installationIdentifier: Self.installationIdentifier,
+                groupIdentifier: group.identifier,
+                groupName: group.name,
+                groupCreatedByApp: groupResult.createdByApp,
+                records: records,
+                createdAt: now,
+                updatedAt: now
+            )
         }
 
         return summary
@@ -198,12 +247,12 @@ final class ContactExportService {
         }
     }
 
-    private func ensureGroup(named rawName: String) throws -> CNGroup {
+    private func ensureGroup(named rawName: String) throws -> (group: CNGroup, createdByApp: Bool) {
         let groupName = rawName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "고객리스트" : rawName
         let containerId = store.defaultContainerIdentifier()
         let groups = try store.groups(matching: nil)
         if let existing = groups.first(where: { $0.name == groupName }) {
-            return existing
+            return (existing, false)
         }
 
         let group = CNMutableGroup()
@@ -215,7 +264,7 @@ final class ContactExportService {
         guard let created = try store.groups(matching: nil).first(where: { $0.name == groupName }) else {
             throw ContactExportError.groupCreationFailed
         }
-        return created
+        return (created, true)
     }
 
     private func fetchExistingPhones(keys: [CNKeyDescriptor]) throws -> [String: Bool] {
@@ -276,7 +325,9 @@ final class ContactExportService {
                     customerId: customer.id,
                     status: .registered,
                     contactIdentifier: contact.identifier,
-                    registeredName: registeredName
+                    registeredName: registeredName,
+                    normalizedPhone: Self.normalizedPhone(customer.phoneNumber),
+                    ownership: .createdByApp
                 )
             )
         } catch {
@@ -316,9 +367,24 @@ final class ContactExportService {
                 customerId: customer.id,
                 status: .failed,
                 contactIdentifier: nil,
-                registeredName: nil
+                registeredName: nil,
+                normalizedPhone: Self.normalizedPhone(customer.phoneNumber),
+                ownership: .unknown
             )
         )
+    }
+
+    private func resolvedOwnership(
+        for existing: CNContact,
+        customer: Customer,
+        fallback: ContactRegistrationOwnership
+    ) -> ContactRegistrationOwnership {
+        if customer.contactIdentifier == existing.identifier,
+           (customer.contactRegistrationOwnership == .createdByApp ||
+            (customer.contactRegistrationOwnership == nil && customer.contactRegistrationStatus == .registered)) {
+            return .createdByApp
+        }
+        return fallback
     }
 
     static func normalizedPhone(_ value: String) -> String {

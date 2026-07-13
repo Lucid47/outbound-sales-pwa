@@ -69,6 +69,7 @@ struct GroupSmsCampaignView: View {
     @State private var showingContactPicker = false
     @State private var showingContactGroupPicker = false
     @State private var showingLaunchConfirmation = false
+    @State private var showingCallbackRecovery = false
     @State private var sendTiming: GroupSmsSendTiming = .now
     @State private var scheduledAt = Date().addingTimeInterval(60 * 60)
     @State private var isScheduling = false
@@ -95,6 +96,10 @@ struct GroupSmsCampaignView: View {
 
     private var messageTargets: [GroupMessageTarget] {
         targetCandidates.map(messageTarget(from:)) + additionalContactTargets
+    }
+
+    private var currentTargetIds: Set<String> {
+        Set(messageTargets.compactMap(\.sourceRecordId))
     }
 
     private var selection: GroupSmsTargetSelectionResult {
@@ -227,6 +232,22 @@ struct GroupSmsCampaignView: View {
             Button("취소", role: .cancel) {}
         } message: {
             Text(confirmationMessage)
+        }
+        .confirmationDialog("발송 결과를 받지 못했나요?", isPresented: $showingCallbackRecovery) {
+            Button("발송 요청 완료로 기록") {
+                guard let campaign = currentCampaign else { return }
+                state.markGroupSmsCampaign(campaign.id, status: .requested)
+            }
+            Button("취소로 기록", role: .destructive) {
+                guard let campaign = currentCampaign else { return }
+                state.markGroupSmsCampaign(campaign.id, status: .cancelled)
+            }
+            Button("자동화 진단 열기") {
+                showingDiagnostics = true
+            }
+            Button("계속 기다리기", role: .cancel) {}
+        } message: {
+            Text("Shortcuts에서 발송을 마쳤지만 앱으로 자동 복귀하지 않은 경우에만 사용하세요. 완료로 기록해도 통신사의 실제 전달 성공을 확인하는 것은 아닙니다.")
         }
         .onAppear {
             migrateReadinessIfNeeded()
@@ -372,6 +393,28 @@ struct GroupSmsCampaignView: View {
                     }
                     .font(.subheadline.weight(.semibold))
                 }
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    excludedTargetIds.subtract(currentTargetIds)
+                } label: {
+                    Label("전체 선택", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(GroupSmsSecondaryButtonStyle())
+                .disabled(currentTargetIds.isDisjoint(with: excludedTargetIds))
+
+                Button {
+                    excludedTargetIds.formUnion(currentTargetIds)
+                } label: {
+                    Label("전체 해제", systemImage: "circle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(GroupSmsSecondaryButtonStyle())
+                .disabled(currentTargetIds.isEmpty || currentTargetIds.isSubset(of: excludedTargetIds))
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
@@ -615,8 +658,17 @@ struct GroupSmsCampaignView: View {
             Text("앱에는 확인 가능한 요청 상태만 기록됩니다.")
                 .font(.caption)
                 .foregroundStyle(AppPalette.textSecondary)
-            Button("자동화 진단") {
+            Button {
+                showingCallbackRecovery = true
+            } label: {
+                Label("결과를 받지 못했나요?", systemImage: "exclamationmark.triangle")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            Button {
                 showingDiagnostics = true
+            } label: {
+                Label("자동화 진단", systemImage: "wrench.and.screwdriver")
             }
             .buttonStyle(.bordered)
             .controlSize(.large)

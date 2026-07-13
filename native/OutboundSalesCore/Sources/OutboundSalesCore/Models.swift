@@ -47,6 +47,76 @@ public enum ContactRegistrationStatus: String, Codable, Sendable {
     case failed
 }
 
+public enum ContactRegistrationOwnership: String, Codable, Sendable {
+    case createdByApp
+    case updatedExisting
+    case linkedExisting
+    case unknown
+}
+
+public struct ContactExportRecord: Identifiable, Codable, Equatable, Sendable {
+    public var id: String { contactIdentifier }
+    public var customerId: String
+    public var contactIdentifier: String
+    public var registeredName: String
+    public var normalizedPhone: String
+    public var ownership: ContactRegistrationOwnership
+
+    public init(
+        customerId: String,
+        contactIdentifier: String,
+        registeredName: String,
+        normalizedPhone: String,
+        ownership: ContactRegistrationOwnership
+    ) {
+        self.customerId = customerId
+        self.contactIdentifier = contactIdentifier
+        self.registeredName = registeredName
+        self.normalizedPhone = normalizedPhone
+        self.ownership = ownership
+    }
+}
+
+public struct ContactExportBatch: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var customerListId: String
+    public var installationIdentifier: String
+    public var groupIdentifier: String?
+    public var groupName: String
+    public var groupCreatedByApp: Bool
+    public var records: [ContactExportRecord]
+    public var deletedContactIdentifiers: [String]
+    public var groupDeletedAt: Date?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        customerListId: String,
+        installationIdentifier: String,
+        groupIdentifier: String?,
+        groupName: String,
+        groupCreatedByApp: Bool,
+        records: [ContactExportRecord],
+        deletedContactIdentifiers: [String] = [],
+        groupDeletedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.customerListId = customerListId
+        self.installationIdentifier = installationIdentifier
+        self.groupIdentifier = groupIdentifier
+        self.groupName = groupName
+        self.groupCreatedByApp = groupCreatedByApp
+        self.records = records
+        self.deletedContactIdentifiers = deletedContactIdentifiers
+        self.groupDeletedAt = groupDeletedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum CustomerPhotoSource: String, Codable, Sendable {
     case camera
     case photoLibrary
@@ -109,6 +179,22 @@ public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+public struct DashboardStatusDefinition: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var colorHex: String
+    public var orderIndex: Int
+    public var updatedAt: Date
+
+    public init(id: String, name: String, colorHex: String, orderIndex: Int, updatedAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.colorHex = colorHex
+        self.orderIndex = orderIndex
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct Customer: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var customerListId: String
@@ -124,7 +210,9 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
     public var geocodeQuery: String?
     public var region: String?
     public var status: CustomerStatus
+    public var dashboardStatusId: String?
     public var contactRegistrationStatus: ContactRegistrationStatus?
+    public var contactRegistrationOwnership: ContactRegistrationOwnership?
     public var contactIdentifier: String?
     public var contactRegisteredAt: Date?
     public var contactRegisteredName: String?
@@ -146,7 +234,9 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         geocodeQuery: String? = nil,
         region: String? = nil,
         status: CustomerStatus = .open,
+        dashboardStatusId: String? = nil,
         contactRegistrationStatus: ContactRegistrationStatus? = nil,
+        contactRegistrationOwnership: ContactRegistrationOwnership? = nil,
         contactIdentifier: String? = nil,
         contactRegisteredAt: Date? = nil,
         contactRegisteredName: String? = nil,
@@ -167,7 +257,9 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         self.geocodeQuery = geocodeQuery
         self.region = region
         self.status = status
+        self.dashboardStatusId = dashboardStatusId
         self.contactRegistrationStatus = contactRegistrationStatus
+        self.contactRegistrationOwnership = contactRegistrationOwnership
         self.contactIdentifier = contactIdentifier
         self.contactRegisteredAt = contactRegisteredAt
         self.contactRegisteredName = contactRegisteredName

@@ -102,6 +102,28 @@ struct TodayView: View {
                     TodayClockHeader()
                 }
 
+                Section("고객 프로세스") {
+                    NavigationLink {
+                        ProcessDashboardView()
+                            .environmentObject(state)
+                            .modifier(DashboardFullscreenModifier())
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "square.grid.3x3.fill")
+                                .font(.title2)
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("전체 고객 현황 보기")
+                                    .font(.headline)
+                                Text("최대 100명씩 색상 격자로 확인합니다.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section("요약") {
                     LabeledContent("선택 리스트", value: state.selectedList?.name ?? "없음")
                     LabeledContent("미완료", value: "\(state.openCustomerCount)")
@@ -145,6 +167,16 @@ struct TodayView: View {
             }
             .navigationTitle("오늘")
         }
+    }
+}
+
+private struct DashboardFullscreenModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        content.toolbar(.hidden, for: .tabBar)
+        #else
+        content
+        #endif
     }
 }
 
@@ -477,7 +509,7 @@ struct ActiveListPanel: View {
                 Button {
                     showingContactExport = true
                 } label: {
-                    Label("연락처 등록", systemImage: "person.crop.circle.badge.plus")
+                    Label("연락처 관리", systemImage: "person.crop.circle.badge.plus")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
