@@ -28,6 +28,13 @@ private enum GroupSmsCampaignStep: Int, CaseIterable {
     }
 }
 
+private enum GroupSmsSendTiming: String, CaseIterable, Identifiable {
+    case now = "지금 발송"
+    case scheduled = "예약"
+
+    var id: String { rawValue }
+}
+
 enum GroupSmsCampaignTargetScope: String, CaseIterable, Identifiable {
     case selectedList = "현재 리스트"
     case todaySchedule = "오늘"
@@ -38,6 +45,7 @@ enum GroupSmsCampaignTargetScope: String, CaseIterable, Identifiable {
 
 struct GroupSmsCampaignView: View {
     @EnvironmentObject private var state: NativeAppState
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @AppStorage("groupSmsShortcutVerified") private var legacyShortcutVerified = false
     @AppStorage("groupSmsShortcutVerifiedAt") private var shortcutVerifiedAt = ""
@@ -46,7 +54,8 @@ struct GroupSmsCampaignView: View {
 
     @State private var step: GroupSmsCampaignStep = .targets
     @State private var targetScope: GroupSmsCampaignTargetScope = .selectedList
-    @State private var excludedCustomerIds = Set<String>()
+    @State private var additionalContactTargets: [GroupMessageTarget] = []
+    @State private var excludedTargetIds = Set<String>()
     @State private var removesDuplicatePhones = true
     @State private var campaignTitle = "단체문자"
     @State private var selectedTemplateId = ""
@@ -57,7 +66,12 @@ struct GroupSmsCampaignView: View {
     @State private var maxDelaySeconds = 6
     @State private var showingDelaySettings = false
     @State private var showingDiagnostics = false
+    @State private var showingContactPicker = false
+    @State private var showingContactGroupPicker = false
     @State private var showingLaunchConfirmation = false
+    @State private var sendTiming: GroupSmsSendTiming = .now
+    @State private var scheduledAt = Date().addingTimeInterval(60 * 60)
+    @State private var isScheduling = false
     @State private var currentCampaignId = ""
     @State private var statusMessage = ""
 
@@ -80,27 +94,13 @@ struct GroupSmsCampaignView: View {
     }
 
     private var messageTargets: [GroupMessageTarget] {
-        targetCandidates.map { customer in
-            GroupMessageTarget(
-                sourceRecordId: customer.id,
-                displayName: customer.name,
-                phoneNumber: customer.phoneNumber,
-                mergeFields: [
-                    "고객명": customer.name,
-                    "이름": customer.name,
-                    "연락처": customer.phoneNumber,
-                    "주소": customer.address,
-                    "메모": customer.notes
-                ],
-                sourceMetadata: ["customerListId": customer.customerListId]
-            )
-        }
+        targetCandidates.map(messageTarget(from:)) + additionalContactTargets
     }
 
     private var selection: GroupSmsTargetSelectionResult {
         GroupSmsTargetSelector.select(
             targets: messageTargets,
-            userExcludedSourceRecordIds: excludedCustomerIds,
+            userExcludedSourceRecordIds: excludedTargetIds,
             removesDuplicatePhones: removesDuplicatePhones
         )
     }
@@ -168,7 +168,9 @@ struct GroupSmsCampaignView: View {
         ZStack {
             AppPalette.pageBackground.ignoresSafeArea()
 
-            if isRunning {
+            if currentCampaign?.status == .scheduled {
+                scheduledConfirmationView
+            } else if isRunning {
                 runningView
             } else if hasResult {
                 resultView
@@ -192,13 +194,39 @@ struct GroupSmsCampaignView: View {
             GroupSmsTestView()
                 .environmentObject(state)
         }
-        .confirmationDialog("\(recipients.count)명에게 발송 요청을 시작할까요?", isPresented: $showingLaunchConfirmation) {
-            Button("발송 시작") {
-                launchCampaign()
+        #if os(iOS)
+        .sheet(isPresented: $showingContactPicker) {
+            ContactPickerSheet(
+                onSelect: { contacts in
+                    addContactTargets(contacts)
+                    showingContactPicker = false
+                },
+                onCancel: {
+                    showingContactPicker = false
+                }
+            )
+        }
+        #endif
+        .sheet(isPresented: $showingContactGroupPicker) {
+            ContactGroupImportSheet(
+                navigationTitle: "발송 대상 그룹",
+                confirmationTitle: "대상 추가"
+            ) { draft in
+                addContactTargets(draft.contacts)
+                showingContactGroupPicker = false
+            }
+        }
+        .confirmationDialog(confirmationTitle, isPresented: $showingLaunchConfirmation) {
+            Button(sendTiming == .scheduled ? "예약 저장" : "발송 시작") {
+                if sendTiming == .scheduled {
+                    Task { await scheduleCampaign() }
+                } else {
+                    launchCampaign()
+                }
             }
             Button("취소", role: .cancel) {}
         } message: {
-            Text("모든 수신자는 한 명씩 개별 메시지로 처리됩니다.")
+            Text(confirmationMessage)
         }
         .onAppear {
             migrateReadinessIfNeeded()
@@ -300,7 +328,7 @@ struct GroupSmsCampaignView: View {
 
     private var targetStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            sectionHeading("누구에게 보낼까요?", detail: state.selectedList?.name ?? "고객리스트를 먼저 선택하세요")
+            sectionHeading("누구에게 보낼까요?", detail: state.selectedList?.name ?? "연락처에서 직접 대상을 추가할 수 있습니다")
 
             Picker("대상 범위", selection: $targetScope) {
                 ForEach(GroupSmsCampaignTargetScope.allCases) { scope in
@@ -308,6 +336,43 @@ struct GroupSmsCampaignView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            HStack(spacing: 10) {
+                #if os(iOS)
+                Button {
+                    showingContactPicker = true
+                } label: {
+                    Label("연락처 선택", systemImage: "person.crop.circle.badge.plus")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(GroupSmsSecondaryButtonStyle())
+                #endif
+
+                Button {
+                    showingContactGroupPicker = true
+                } label: {
+                    Label("그룹 선택", systemImage: "person.3.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(GroupSmsSecondaryButtonStyle())
+            }
+
+            if !additionalContactTargets.isEmpty {
+                HStack {
+                    Label("연락처에서 \(additionalContactTargets.count)명 추가", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("모두 제거", role: .destructive) {
+                        let ids = Set(additionalContactTargets.compactMap(\.sourceRecordId))
+                        excludedTargetIds.subtract(ids)
+                        additionalContactTargets.removeAll()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
                 metricCard("후보", value: selection.totalCandidateCount, color: .blue)
@@ -319,12 +384,19 @@ struct GroupSmsCampaignView: View {
                 .font(.headline)
                 .padding(.vertical, 4)
 
-            if targetCandidates.isEmpty {
+            if messageTargets.isEmpty {
                 emptyState("선택한 범위에 고객이 없습니다.", icon: "person.crop.circle.badge.xmark")
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 8)], spacing: 8) {
                     ForEach(targetCandidates) { customer in
                         customerSelectionRow(customer)
+                    }
+                    ForEach(additionalContactTargets, id: \.sourceRecordId) { target in
+                        targetSelectionRow(
+                            target,
+                            subtitle: target.phoneNumber.isEmpty ? "연락처 없음" : target.phoneNumber,
+                            sourceLabel: "연락처"
+                        )
                     }
                 }
             }
@@ -415,6 +487,38 @@ struct GroupSmsCampaignView: View {
                 metricTextCard("형식", value: messageKindText, color: .indigo)
                 metricTextCard("예상", value: durationText, color: .orange)
             }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Label("발송 시점", systemImage: "calendar.badge.clock")
+                    .font(.headline)
+
+                Picker("발송 시점", selection: $sendTiming) {
+                    ForEach(GroupSmsSendTiming.allCases) { timing in
+                        Text(timing.rawValue).tag(timing)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if sendTiming == .scheduled {
+                    DatePicker(
+                        "예약 날짜와 시간",
+                        selection: $scheduledAt,
+                        in: Date().addingTimeInterval(60)...,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    .font(.headline)
+
+                    Label(
+                        "예약 시각에 알림을 보내며, 알림에서 발송 시작을 확인합니다.",
+                        systemImage: "bell.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(AppPalette.textSecondary)
+                }
+            }
+            .padding(14)
+            .background(AppPalette.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
 
             if preflight.blockingReasons.isEmpty == false || selection.excludedTargets.isEmpty == false {
                 VStack(alignment: .leading, spacing: 9) {
@@ -549,6 +653,48 @@ struct GroupSmsCampaignView: View {
         .padding(24)
     }
 
+    private var scheduledConfirmationView: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Image(systemName: "calendar.badge.checkmark")
+                .font(.system(size: 52))
+                .foregroundStyle(.green)
+            Text("예약을 저장했습니다")
+                .font(.title2.weight(.bold))
+            Text(scheduledDateText(currentCampaign?.scheduledAt))
+                .font(.headline)
+                .foregroundStyle(AppPalette.textSecondary)
+            Text("\(currentCampaign?.recipients.count ?? 0)명 · 예약 시각에 발송 확인 알림이 표시됩니다.")
+                .font(.subheadline)
+                .foregroundStyle(AppPalette.textSecondary)
+                .multilineTextAlignment(.center)
+
+            Button {
+                dismiss()
+            } label: {
+                Label("완료", systemImage: "checkmark")
+                    .font(.headline)
+                    .frame(maxWidth: 320, minHeight: 54)
+            }
+            .buttonStyle(GroupSmsPrimaryButtonStyle())
+
+            Button(role: .destructive) {
+                if let campaign = currentCampaign {
+                    GroupSmsScheduleNotificationService.cancel(
+                        notificationIdentifier: campaign.scheduleNotificationIdentifier
+                    )
+                    state.markGroupSmsCampaign(campaign.id, status: .cancelled)
+                    dismiss()
+                }
+            } label: {
+                Label("예약 취소", systemImage: "xmark")
+            }
+            .buttonStyle(.bordered)
+            Spacer()
+        }
+        .padding(24)
+    }
+
     private func sectionHeading(_ title: String, detail: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -594,17 +740,30 @@ struct GroupSmsCampaignView: View {
     }
 
     private func customerSelectionRow(_ customer: Customer) -> some View {
-        let exclusion = selection.excludedTargets.first { $0.target.sourceRecordId == customer.id }
+        targetSelectionRow(
+            messageTarget(from: customer),
+            subtitle: customer.phoneNumber.isEmpty ? "연락처 없음" : customer.phoneNumber,
+            sourceLabel: nil
+        )
+    }
+
+    private func targetSelectionRow(
+        _ target: GroupMessageTarget,
+        subtitle: String,
+        sourceLabel: String?
+    ) -> some View {
+        let targetId = target.sourceRecordId ?? target.phoneNumber
+        let exclusion = selection.excludedTargets.first { $0.target.sourceRecordId == target.sourceRecordId }
         let isManualExclusion = exclusion?.reason == .userExcluded
         let isUnavailable = exclusion != nil && !isManualExclusion
         let isSelected = exclusion == nil
 
         return Button {
             guard !isUnavailable else { return }
-            if excludedCustomerIds.contains(customer.id) {
-                excludedCustomerIds.remove(customer.id)
+            if excludedTargetIds.contains(targetId) {
+                excludedTargetIds.remove(targetId)
             } else {
-                excludedCustomerIds.insert(customer.id)
+                excludedTargetIds.insert(targetId)
             }
         } label: {
             HStack(spacing: 12) {
@@ -613,13 +772,21 @@ struct GroupSmsCampaignView: View {
                     .foregroundStyle(isSelected ? Color.accentColor : isUnavailable ? .orange : AppPalette.textSecondary)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(customer.name.isEmpty ? "이름 없음" : customer.name)
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(AppPalette.textPrimary)
-                        .lineLimit(1)
-                    Text(customer.phoneNumber.isEmpty ? "연락처 없음" : customer.phoneNumber)
+                    HStack(spacing: 6) {
+                        Text(target.displayName.isEmpty ? "이름 없음" : target.displayName)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(AppPalette.textPrimary)
+                            .lineLimit(1)
+                        if let sourceLabel {
+                            Text(sourceLabel)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Color.accentColor)
+                        }
+                    }
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(AppPalette.textSecondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
@@ -642,6 +809,55 @@ struct GroupSmsCampaignView: View {
         }
         .buttonStyle(.plain)
         .disabled(isUnavailable)
+    }
+
+    private func messageTarget(from customer: Customer) -> GroupMessageTarget {
+        GroupMessageTarget(
+            sourceRecordId: customer.id,
+            displayName: customer.name,
+            phoneNumber: customer.phoneNumber,
+            mergeFields: [
+                "고객명": customer.name,
+                "이름": customer.name,
+                "연락처": customer.phoneNumber,
+                "주소": customer.address,
+                "메모": customer.notes
+            ],
+            sourceMetadata: [
+                "source": "customer",
+                "customerListId": customer.customerListId
+            ]
+        )
+    }
+
+    private func addContactTargets(_ contacts: [ContactImportCustomer]) {
+        var targetsById = Dictionary(
+            uniqueKeysWithValues: additionalContactTargets.compactMap { target in
+                target.sourceRecordId.map { ($0, target) }
+            }
+        )
+        for contact in contacts {
+            let sourceRecordId = "contact:\(contact.contactIdentifier)"
+            targetsById[sourceRecordId] = GroupMessageTarget(
+                sourceRecordId: sourceRecordId,
+                displayName: contact.name,
+                phoneNumber: contact.phoneNumber,
+                mergeFields: [
+                    "고객명": contact.name,
+                    "이름": contact.name,
+                    "연락처": contact.phoneNumber,
+                    "주소": contact.address,
+                    "메모": contact.notes
+                ],
+                sourceMetadata: [
+                    "source": "contacts",
+                    "contactIdentifier": contact.contactIdentifier
+                ]
+            )
+        }
+        additionalContactTargets = targetsById.values.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+        }
     }
 
     private func advance() {
@@ -685,7 +901,7 @@ struct GroupSmsCampaignView: View {
                 id: campaignId,
                 title: title,
                 customerListId: state.selectedListId,
-                targetDescription: "\(targetScope.rawValue) · \(recipients.count)명",
+                targetDescription: targetDescription,
                 messageTemplate: messageTemplate,
                 recipients: recipients,
                 status: .ready
@@ -701,6 +917,48 @@ struct GroupSmsCampaignView: View {
             }
         } catch {
             statusMessage = "발송 payload를 만들지 못했습니다."
+        }
+    }
+
+    @MainActor
+    private func scheduleCampaign() async {
+        guard preflight.canLaunch else {
+            statusMessage = preflight.blockingReasons.map(blockingReasonText).joined(separator: " · ")
+            return
+        }
+        guard scheduledAt > Date().addingTimeInterval(30) else {
+            statusMessage = "현재 시각보다 뒤의 예약 시간을 선택하세요."
+            return
+        }
+
+        isScheduling = true
+        defer { isScheduling = false }
+        let campaignId = UUID().uuidString
+        let title = campaignTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "단체문자" : campaignTitle
+
+        do {
+            let notificationIdentifier = try await GroupSmsScheduleNotificationService.schedule(
+                campaignId: campaignId,
+                title: title,
+                recipientCount: recipients.count,
+                at: scheduledAt
+            )
+            state.saveGroupSmsCampaign(
+                id: campaignId,
+                title: title,
+                customerListId: state.selectedListId,
+                targetDescription: targetDescription,
+                messageTemplate: messageTemplate,
+                recipients: recipients,
+                status: .scheduled,
+                scheduledAt: scheduledAt,
+                scheduleNotificationIdentifier: notificationIdentifier,
+                scheduleDeviceIdentifier: GroupSmsScheduleNotificationService.currentDeviceIdentifier
+            )
+            currentCampaignId = campaignId
+            statusMessage = ""
+        } catch {
+            statusMessage = error.localizedDescription
         }
     }
 
@@ -732,7 +990,7 @@ struct GroupSmsCampaignView: View {
 
     private func resetCampaign() {
         currentCampaignId = ""
-        excludedCustomerIds = []
+        excludedTargetIds = []
         step = .targets
         statusMessage = ""
     }
@@ -750,7 +1008,7 @@ struct GroupSmsCampaignView: View {
         switch step {
         case .targets: return "메시지 작성"
         case .message: return "발송 전 확인"
-        case .review: return "발송 시작"
+        case .review: return sendTiming == .scheduled ? "예약 저장" : "발송 시작"
         }
     }
 
@@ -758,7 +1016,7 @@ struct GroupSmsCampaignView: View {
         switch step {
         case .targets: return "chevron.right"
         case .message: return "checklist"
-        case .review: return "paperplane.fill"
+        case .review: return sendTiming == .scheduled ? "calendar.badge.clock" : "paperplane.fill"
         }
     }
 
@@ -766,8 +1024,35 @@ struct GroupSmsCampaignView: View {
         switch step {
         case .targets: return selection.includedTargets.isEmpty
         case .message: return messageTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .review: return !preflight.canLaunch
+        case .review:
+            return !preflight.canLaunch
+                || isScheduling
+                || (sendTiming == .scheduled && scheduledAt <= Date().addingTimeInterval(30))
         }
+    }
+
+    private var confirmationTitle: String {
+        if sendTiming == .scheduled {
+            return "\(recipients.count)명의 단체문자를 예약할까요?"
+        }
+        return "\(recipients.count)명에게 발송 요청을 시작할까요?"
+    }
+
+    private var confirmationMessage: String {
+        if sendTiming == .scheduled {
+            return "\(scheduledDateText(scheduledAt))에 발송 확인 알림을 표시합니다. 알림만으로 문자가 자동 발송되지는 않습니다."
+        }
+        return "모든 수신자는 한 명씩 개별 메시지로 처리됩니다."
+    }
+
+    private var targetDescription: String {
+        let contactText = additionalContactTargets.isEmpty ? "" : " + 연락처 \(additionalContactTargets.count)명"
+        return "\(targetScope.rawValue)\(contactText) · \(recipients.count)명"
+    }
+
+    private func scheduledDateText(_ date: Date?) -> String {
+        guard let date else { return "예약 시간 정보 없음" }
+        return Self.scheduledDateFormatter.string(from: date)
     }
 
     private var readinessTitle: String {
@@ -854,6 +1139,13 @@ struct GroupSmsCampaignView: View {
     private var resultColor: Color {
         currentCampaign?.status == .requested ? .green : .orange
     }
+
+    private static let scheduledDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy년 M월 d일 E a h:mm"
+        return formatter
+    }()
 }
 
 private struct GroupSmsPrimaryButtonStyle: ButtonStyle {

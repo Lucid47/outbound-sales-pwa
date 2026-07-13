@@ -1,14 +1,45 @@
 import OutboundSalesNative
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @main
-final class AppDelegate: UIResponder, UIApplicationDelegate {
+final class AppDelegate: UIResponder, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        GroupSmsScheduleNotificationService.registerNotificationCategory()
+        UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        Self.postScheduledCampaignAction(response)
+        completionHandler()
+    }
+
+    static func postScheduledCampaignAction(_ response: UNNotificationResponse) {
+        guard let campaignId = GroupSmsScheduleNotificationService.campaignId(
+            from: response.notification.request.content.userInfo
+        ) else { return }
+        let event = GroupSmsScheduleNotificationEvent(
+            campaignId: campaignId,
+            action: GroupSmsScheduleNotificationService.action(for: response.actionIdentifier)
+        )
+        NotificationCenter.default.post(name: .outboundSalesScheduledGroupSmsAction, object: event)
     }
 
     func application(
@@ -40,6 +71,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if let url = connectionOptions.urlContexts.first?.url {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .outboundSalesOpenURL, object: url)
+            }
+        }
+        if let response = connectionOptions.notificationResponse {
+            DispatchQueue.main.async {
+                AppDelegate.postScheduledCampaignAction(response)
             }
         }
     }

@@ -3,6 +3,8 @@ import Foundation
 public enum GroupSmsCampaignStatus: String, Codable, Sendable {
     case draft
     case ready
+    case scheduled
+    case due
     case shortcutOpened
     case requested
     case cancelled
@@ -222,6 +224,9 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
     public var status: GroupSmsCampaignStatus
     public var recipients: [GroupSmsRecipient]
     public var attachments: [GroupSmsAttachment]?
+    public var scheduledAt: Date?
+    public var scheduleNotificationIdentifier: String?
+    public var scheduleDeviceIdentifier: String?
     public var requestedAt: Date?
     public var completedAt: Date?
     public var createdAt: Date
@@ -236,6 +241,9 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
         status: GroupSmsCampaignStatus = .draft,
         recipients: [GroupSmsRecipient],
         attachments: [GroupSmsAttachment]? = nil,
+        scheduledAt: Date? = nil,
+        scheduleNotificationIdentifier: String? = nil,
+        scheduleDeviceIdentifier: String? = nil,
         requestedAt: Date? = nil,
         completedAt: Date? = nil,
         createdAt: Date,
@@ -249,6 +257,9 @@ public struct GroupSmsCampaign: Identifiable, Codable, Equatable, Sendable {
         self.status = status
         self.recipients = recipients
         self.attachments = attachments
+        self.scheduledAt = scheduledAt
+        self.scheduleNotificationIdentifier = scheduleNotificationIdentifier
+        self.scheduleDeviceIdentifier = scheduleDeviceIdentifier
         self.requestedAt = requestedAt
         self.completedAt = completedAt
         self.createdAt = createdAt

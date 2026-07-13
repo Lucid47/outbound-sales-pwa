@@ -204,8 +204,20 @@ struct ContactGroupImportSheet: View {
     @State private var selectedGroupIds = Set<String>()
     @State private var message = ""
     @State private var isLoading = false
+    let navigationTitle: String
+    let confirmationTitle: String
     let onImport: (ContactImportDraft) -> Void
     private let service = ContactImportService()
+
+    init(
+        navigationTitle: String = "그룹 선택",
+        confirmationTitle: String = "가져오기",
+        onImport: @escaping (ContactImportDraft) -> Void
+    ) {
+        self.navigationTitle = navigationTitle
+        self.confirmationTitle = confirmationTitle
+        self.onImport = onImport
+    }
 
     var body: some View {
         NavigationStack {
@@ -235,7 +247,7 @@ struct ContactGroupImportSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("그룹 선택")
+            .navigationTitle(navigationTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("취소") { dismiss() }
@@ -247,7 +259,7 @@ struct ContactGroupImportSheet: View {
                     .disabled(isLoading)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("가져오기") {
+                    Button(confirmationTitle) {
                         Task { await importSelectedGroups() }
                     }
                     .disabled(isLoading || selectedGroupIds.isEmpty)

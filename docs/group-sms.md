@@ -578,3 +578,44 @@ com.lucid47.outboundsales:/group-sms/error?campaignId=...
 - 50건 이상 장시간 실행 시 화면 잠금, Shortcuts 중단, 발송 지연 체감 검증
 
 상세 시험 순서와 고객 파일럿 진입 조건은 `docs/group-sms-test-plan.md`를 따른다.
+
+## 연락처 대상과 예약 발송 구현
+
+### 연락처 대상
+
+- `CNContactPickerViewController`를 이용해 사용자가 선택한 개인 연락처를 캠페인 대상으로 추가한다.
+- `CNContactStore.groups(matching:)`와 `CNContact.predicateForContactsInGroup(withIdentifier:)`를 이용해 연락처 그룹을 일괄 선택한다.
+- 연락처는 고객리스트에 자동 저장하지 않고 `sourceRecordId = contact:<identifier>`인 `GroupMessageTarget`으로 변환한다.
+- 이름, 휴대폰 번호, 주소, 조직 정보를 개인화 필드로 스냅샷한다.
+- 고객 데이터와 연락처 데이터를 합친 뒤 `GroupSmsTargetSelector`를 한 번 적용해 잘못된 번호와 중복 번호를 공통 제외한다.
+- 연락처 앱에서 원본이 변경되더라도 이미 예약된 캠페인의 대상과 메시지는 바뀌지 않는다.
+
+### 예약 모델
+
+`GroupSmsCampaign`에 아래 선택 필드를 사용한다. 선택 필드로 추가해 이전 `native-data.json`과 Drive 백업을 계속 디코딩할 수 있게 한다.
+
+```text
+status: scheduled | due
+scheduledAt
+scheduleNotificationIdentifier
+scheduleDeviceIdentifier
+```
+
+### 예약 실행 계약
+
+1. 사용자는 발송 전 확인에서 `예약`과 날짜·시간을 선택한다.
+2. 앱은 알림 권한을 확인하고 `UNCalendarNotificationTrigger`를 등록한다.
+3. 알림에는 `발송 시작`, `10분 뒤`, `예약 취소` 액션을 제공한다.
+4. 알림을 누르면 앱에서 캠페인명, 대상 수, 예약 시간을 다시 표시한다.
+5. 사용자가 발송 시작을 누른 시점에 저장된 수신자 스냅샷으로 payload를 만들고 기존 `SoheeGroupSMS`를 실행한다.
+6. `10분 뒤`는 기존 알림을 교체하고 캠페인의 `scheduledAt`을 갱신한다.
+7. `예약 취소`는 대기·전달된 알림을 제거하고 캠페인을 `cancelled`로 변경한다.
+
+예약은 정확한 시각의 무인 발송이 아니다. iOS가 백그라운드 앱 실행과 Shortcuts 전면 실행을 보장하지 않으므로, 예약 시각에 사용자의 주의를 환기하고 최종 발송을 확인받는 안전한 방식으로 정의한다.
+
+### 기기간 중복 방지
+
+- 캠페인과 예약 메타데이터는 Google Drive 백업에 포함한다.
+- 로컬 알림과 활성 예약 목록은 `scheduleDeviceIdentifier`가 현재 기기와 같은 경우에만 사용한다.
+- 다른 기기에서 복원한 예약은 자동 재등록하거나 자동 실행하지 않는다.
+- 향후 서버 기반 분산 잠금이나 실행 lease를 도입하기 전까지 예약 실행 소유권은 생성 기기 한 대로 제한한다.

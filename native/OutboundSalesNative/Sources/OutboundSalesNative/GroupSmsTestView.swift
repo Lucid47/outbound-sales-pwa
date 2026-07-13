@@ -649,6 +649,8 @@ struct GroupSmsTestView: View {
         switch status {
         case .draft: return "임시"
         case .ready: return "준비"
+        case .scheduled: return "예약"
+        case .due: return "발송대기"
         case .shortcutOpened: return "실행"
         case .requested: return "요청완료"
         case .cancelled: return "취소"
@@ -663,7 +665,7 @@ struct GroupSmsTestView: View {
             return .green
         case .cancelled, .shortcutFailed:
             return .red
-        case .shortcutOpened, .ready:
+        case .shortcutOpened, .ready, .scheduled, .due:
             return .orange
         case .draft, .unknown:
             return .secondary

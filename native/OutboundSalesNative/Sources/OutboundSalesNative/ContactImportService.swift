@@ -37,14 +37,15 @@ final class ContactImportService {
 
     func groups() async throws -> [ContactImportGroup] {
         try await requestAccessIfNeeded()
-        let containers = try store.containers(matching: nil)
-        let containerNames = Dictionary(uniqueKeysWithValues: containers.map { ($0.identifier, $0.name) })
         return try store.groups(matching: nil)
             .map { group in
-                ContactImportGroup(
+                let containerName = try? store.containers(
+                    matching: CNContainer.predicateForContainerOfGroup(withIdentifier: group.identifier)
+                ).first?.name
+                return ContactImportGroup(
                     id: group.identifier,
                     name: group.name,
-                    containerName: containerNames[group.identifier] ?? "",
+                    containerName: containerName ?? "",
                     count: (try? contactCount(in: group)) ?? 0
                 )
             }

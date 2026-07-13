@@ -421,6 +421,9 @@ final class OutboundSalesCoreTests: XCTestCase {
                             plannedDelaySeconds: 0
                         )
                     ],
+                    scheduledAt: now.addingTimeInterval(3_600),
+                    scheduleNotificationIdentifier: "group-sms.schedule.campaign-1",
+                    scheduleDeviceIdentifier: "device-1",
                     requestedAt: now,
                     completedAt: now,
                     createdAt: now,

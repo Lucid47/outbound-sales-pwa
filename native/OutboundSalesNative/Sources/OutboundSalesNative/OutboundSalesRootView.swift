@@ -14,9 +14,16 @@ private enum OutboundSalesRootTab: String {
     case settings
 }
 
+private struct ScheduledGroupSmsPresentation: Identifiable {
+    let campaignId: String
+    let action: GroupSmsScheduleAction
+    var id: String { "\(campaignId)-\(action.rawValue)" }
+}
+
 public struct OutboundSalesRootView: View {
     @StateObject private var state = NativeAppState()
     @AppStorage("selectedRootTab") private var selectedTab = OutboundSalesRootTab.today.rawValue
+    @State private var scheduledGroupSmsPresentation: ScheduledGroupSmsPresentation?
 
     public init() {}
 
@@ -62,6 +69,21 @@ public struct OutboundSalesRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .outboundSalesOpenURL)) { notification in
             guard let url = notification.object as? URL else { return }
             state.handleGroupSmsCallback(url: url)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .outboundSalesScheduledGroupSmsAction)) { notification in
+            guard let event = notification.object as? GroupSmsScheduleNotificationEvent else { return }
+            selectedTab = OutboundSalesRootTab.customers.rawValue
+            scheduledGroupSmsPresentation = ScheduledGroupSmsPresentation(
+                campaignId: event.campaignId,
+                action: event.action
+            )
+        }
+        .sheet(item: $scheduledGroupSmsPresentation) { presentation in
+            ScheduledGroupSmsCampaignView(
+                campaignId: presentation.campaignId,
+                initialAction: presentation.action
+            )
+            .environmentObject(state)
         }
     }
 }
@@ -187,6 +209,13 @@ struct CustomersView: View {
         }
     }
 
+    private var scheduledGroupSmsCount: Int {
+        state.groupSmsCampaigns.filter {
+            ($0.status == .scheduled || $0.status == .due)
+                && $0.scheduleDeviceIdentifier == GroupSmsScheduleNotificationService.currentDeviceIdentifier
+        }.count
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
@@ -229,7 +258,7 @@ struct CustomersView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("단체문자")
                                         .font(.headline)
-                                    Text("현재 고객리스트에서 대상 선택")
+                                    Text("고객리스트 또는 연락처에서 대상 선택")
                                         .font(.caption)
                                         .opacity(0.85)
                                 }
@@ -246,7 +275,37 @@ struct CustomersView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
-                        .disabled(state.selectedList == nil)
+
+                        if scheduledGroupSmsCount > 0 {
+                            NavigationLink {
+                                ScheduledGroupSmsListView()
+                                    .environmentObject(state)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "calendar.badge.clock")
+                                        .foregroundStyle(.orange)
+                                    Text("예약 문자")
+                                        .font(.headline)
+                                        .foregroundStyle(AppPalette.textPrimary)
+                                    Spacer()
+                                    Text("\(scheduledGroupSmsCount)건")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.orange)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(AppPalette.textSecondary)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .padding(.horizontal, 14)
+                                .background(AppPalette.cardBackground)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(AppPalette.hairline, lineWidth: 1)
+                                )
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                        }
 
                         Picker("필터", selection: $filterMode) {
                             ForEach(CustomerFilterMode.allCases) { mode in

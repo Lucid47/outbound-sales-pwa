@@ -381,7 +381,10 @@ public final class NativeAppState: ObservableObject {
         targetDescription: String,
         messageTemplate: String,
         recipients: [GroupSmsRecipient],
-        status: GroupSmsCampaignStatus
+        status: GroupSmsCampaignStatus,
+        scheduledAt: Date? = nil,
+        scheduleNotificationIdentifier: String? = nil,
+        scheduleDeviceIdentifier: String? = nil
     ) {
         let now = Date()
         let campaign = GroupSmsCampaign(
@@ -392,12 +395,34 @@ public final class NativeAppState: ObservableObject {
             messageTemplate: messageTemplate,
             status: status,
             recipients: recipients,
+            scheduledAt: scheduledAt,
+            scheduleNotificationIdentifier: scheduleNotificationIdentifier,
+            scheduleDeviceIdentifier: scheduleDeviceIdentifier,
             requestedAt: status == .shortcutOpened || status == .requested ? now : nil,
             createdAt: now,
             updatedAt: now
         )
         groupSmsCampaigns.removeAll { $0.id == id }
         groupSmsCampaigns.insert(campaign, at: 0)
+        persist()
+    }
+
+    public func groupSmsCampaign(id: String) -> GroupSmsCampaign? {
+        groupSmsCampaigns.first { $0.id == id }
+    }
+
+    public func rescheduleGroupSmsCampaign(
+        _ campaignId: String,
+        scheduledAt: Date,
+        notificationIdentifier: String
+    ) {
+        guard let index = groupSmsCampaigns.firstIndex(where: { $0.id == campaignId }) else { return }
+        groupSmsCampaigns[index].status = .scheduled
+        groupSmsCampaigns[index].scheduledAt = scheduledAt
+        groupSmsCampaigns[index].scheduleNotificationIdentifier = notificationIdentifier
+        groupSmsCampaigns[index].completedAt = nil
+        groupSmsCampaigns[index].updatedAt = Date()
+        actionMessage = "단체문자 예약 시간을 변경했습니다."
         persist()
     }
 
@@ -1259,6 +1284,10 @@ public final class NativeAppState: ObservableObject {
             return "단체문자 캠페인을 임시 저장했습니다."
         case .ready:
             return "단체문자 캠페인을 준비했습니다."
+        case .scheduled:
+            return "단체문자 발송 알림을 예약했습니다."
+        case .due:
+            return "예약한 단체문자의 발송 시간이 되었습니다."
         case .shortcutOpened:
             return "단체문자 단축어를 열었습니다."
         case .requested:
