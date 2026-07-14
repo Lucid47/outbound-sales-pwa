@@ -4,6 +4,13 @@
 
 ## 2026-07-14
 
+- TestFlight 최초 배포 설정 및 빌드 업로드
+  - App Store Connect 앱 레코드와 번들 ID `com.lucid47.outboundsales` 연동
+  - 앱 아이콘의 투명 알파 채널을 제거해 App Store 검증 요구사항 충족
+  - `CFBundleVersion`을 Xcode 빌드 번호와 연동해 업로드마다 올바른 빌드 번호가 적용되도록 수정
+  - Apple 운영체제의 면제 암호화만 사용함을 `ITSAppUsesNonExemptEncryption=false`로 선언
+  - 네이티브 앱 버전 1.0, 빌드 3을 App Store Connect에 업로드
+
 - 원본 Excel/PDF 대조 기반 OCR 14페이지 회귀 검증 및 원근 보정
   - 362행 원본 Excel과 동일 레이아웃 PDF 14페이지를 기준 데이터로 사용하고 사진 14장을 페이지 1~14에 자동 대응
   - 배경 과다 노출, 종이 구김, 가로·세로·180도 방향, 비스듬한 촬영과 원근 왜곡을 포함한 HEIC 입력 검증

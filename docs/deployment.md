@@ -25,6 +25,59 @@ main 브랜치 push
 → GitHub Pages 반영
 ```
 
+## 네이티브 iOS TestFlight 배포
+
+현재 네이티브 앱 배포 설정은 다음과 같습니다.
+
+```text
+앱 이름: 소희야 가자
+Bundle ID: com.lucid47.outboundsales
+Apple Developer Team: 35PZ4DJ283
+버전: 1.0
+최근 업로드: 빌드 3 (2026-07-14)
+```
+
+TestFlight 업로드는 iOS/iPadOS 바이너리를 대상으로 합니다. App Store Connect 앱 레코드에서 macOS 플랫폼을 함께 선택했더라도 macOS 타깃 또는 Mac Catalyst 빌드를 별도로 만들기 전까지 macOS 앱은 포함되지 않습니다.
+
+### 빌드 전 확인
+
+- `MARKETING_VERSION`은 사용자에게 표시할 앱 버전입니다.
+- `CURRENT_PROJECT_VERSION`은 업로드마다 증가해야 하는 빌드 번호입니다.
+- `Info.plist`의 `CFBundleVersion`은 `$(CURRENT_PROJECT_VERSION)`을 사용합니다.
+- 앱 아이콘 PNG에는 알파 채널이 없어야 합니다.
+- 앱은 HTTPS, Apple Keychain, CryptoKit의 PKCE SHA-256 등 Apple 운영체제에 포함된 면제 암호화만 사용합니다.
+- `Info.plist`의 `ITSAppUsesNonExemptEncryption`을 `false`로 유지하면 빌드마다 수출 규정 질문이 반복되지 않습니다.
+
+### 아카이브와 업로드
+
+Xcode 베타가 다운로드 폴더에 설치된 현재 개발 환경의 예시입니다.
+
+```bash
+DEVELOPER_DIR=/Users/daehee/Downloads/Xcode-beta.app/Contents/Developer \
+xcodebuild \
+  -project native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj \
+  -scheme OutboundSalesiOS \
+  -configuration Release \
+  -destination 'generic/platform=iOS' \
+  -archivePath /tmp/SoheeyaGaja-TestFlight.xcarchive \
+  -allowProvisioningUpdates \
+  archive
+```
+
+ExportOptions plist에는 `method=app-store-connect`, `destination=upload`, `signingStyle=automatic`, `teamID=35PZ4DJ283`을 사용합니다.
+
+```bash
+DEVELOPER_DIR=/Users/daehee/Downloads/Xcode-beta.app/Contents/Developer \
+xcodebuild \
+  -exportArchive \
+  -archivePath /tmp/SoheeyaGaja-TestFlight.xcarchive \
+  -exportPath /tmp/SoheeyaGaja-TestFlight-export \
+  -exportOptionsPlist /tmp/SoheeyaGaja-ExportOptions.plist \
+  -allowProvisioningUpdates
+```
+
+업로드 성공 후 App Store Connect가 빌드를 처리하는 동안 TestFlight에 즉시 나타나지 않을 수 있습니다. 처리 완료 후 내부 테스트 그룹을 만들고 빌드와 테스터를 추가합니다. 외부 테스터 배포는 별도의 Beta App Review가 필요합니다.
+
 ## 로컬 개발
 
 ```bash

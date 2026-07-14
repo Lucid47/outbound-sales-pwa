@@ -38,13 +38,15 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>GoogleDriveOAuthClientID</key>
 	<string>$(GOOGLE_DRIVE_OAUTH_CLIENT_ID)</string>
 	<key>GoogleDriveRedirectScheme</key>
 	<string>$(GOOGLE_DRIVE_REDIRECT_SCHEME)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>고객리스트 문서를 촬영해 OCR로 가져오기 위해 카메라를 사용합니다.</string>
 	<key>NSContactsUsageDescription</key>
