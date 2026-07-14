@@ -195,6 +195,42 @@ public struct DashboardStatusDefinition: Identifiable, Codable, Equatable, Senda
     }
 }
 
+public enum DashboardPaletteFamily: String, Codable, CaseIterable, Sendable {
+    case blue
+    case green
+    case purple
+    case orange
+    case red
+    case gray
+}
+
+public struct DashboardHeatmapSettings: Codable, Equatable, Sendable {
+    public var paletteFamily: DashboardPaletteFamily
+    public var showsLegend: Bool
+    public var statusCount: Int
+    public var updatedAt: Date
+
+    public init(
+        paletteFamily: DashboardPaletteFamily = .blue,
+        showsLegend: Bool = true,
+        statusCount: Int = 5,
+        updatedAt: Date = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+    ) {
+        self.paletteFamily = paletteFamily
+        self.showsLegend = showsLegend
+        self.statusCount = statusCount
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.paletteFamily = try container.decodeIfPresent(DashboardPaletteFamily.self, forKey: .paletteFamily) ?? .blue
+        self.showsLegend = try container.decodeIfPresent(Bool.self, forKey: .showsLegend) ?? true
+        self.statusCount = try container.decodeIfPresent(Int.self, forKey: .statusCount) ?? 0
+        self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .distantPast
+    }
+}
+
 public struct Customer: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var customerListId: String

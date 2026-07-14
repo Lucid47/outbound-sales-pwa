@@ -636,6 +636,12 @@ final class OutboundSalesCoreTests: XCTestCase {
                     updatedAt: now
                 )
             ],
+            dashboardSettings: DashboardHeatmapSettings(
+                paletteFamily: .green,
+                showsLegend: false,
+                statusCount: 7,
+                updatedAt: now
+            ),
             selectedListId: list.id,
             savedAt: now
         )
@@ -687,6 +693,7 @@ final class OutboundSalesCoreTests: XCTestCase {
         let encoded = try encoder.encode(snapshot)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "contactExportBatches")
+        object.removeValue(forKey: "dashboardSettings")
         if var customers = object["customers"] as? [[String: Any]], !customers.isEmpty {
             customers[0].removeValue(forKey: "contactRegistrationOwnership")
             object["customers"] = customers
@@ -699,6 +706,9 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertTrue(decoded.contactExportBatches.isEmpty)
         XCTAssertNil(decoded.customers.first?.contactRegistrationOwnership)
         XCTAssertEqual(decoded.customers.first?.contactRegistrationStatus, .registered)
+        XCTAssertEqual(decoded.dashboardSettings.paletteFamily, .blue)
+        XCTAssertTrue(decoded.dashboardSettings.showsLegend)
+        XCTAssertEqual(decoded.dashboardSettings.statusCount, 5)
     }
 
     private func ocrBox(

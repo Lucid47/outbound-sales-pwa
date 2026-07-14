@@ -31,6 +31,7 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var groupSmsCampaigns: [GroupSmsCampaign]
     @Published public private(set) var contactExportBatches: [ContactExportBatch]
     @Published public private(set) var dashboardStatuses: [DashboardStatusDefinition]
+    @Published public private(set) var dashboardSettings: DashboardHeatmapSettings
     @Published public private(set) var selectedListId: String?
     @Published public var searchText = ""
     @Published public var importMessage = ""
@@ -67,9 +68,19 @@ public final class NativeAppState: ObservableObject {
                 self.messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
                 self.groupSmsCampaigns = snapshot.groupSmsCampaigns
                 self.contactExportBatches = snapshot.contactExportBatches
-                self.dashboardStatuses = snapshot.dashboardStatuses.isEmpty ? Self.defaultDashboardStatuses() : snapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
+                let resolvedDashboardStatuses = snapshot.dashboardStatuses.isEmpty
+                    ? Self.defaultDashboardStatuses()
+                    : Self.migratingDefaultDashboardColors(snapshot.dashboardStatuses)
+                self.dashboardStatuses = resolvedDashboardStatuses
+                var resolvedDashboardSettings = snapshot.dashboardSettings
+                resolvedDashboardSettings.statusCount = resolvedDashboardStatuses.count
+                self.dashboardSettings = resolvedDashboardSettings
                 self.selectedListId = snapshot.selectedListId ?? snapshot.customerLists.first?.id
                 self.storageMessage = "저장된 데이터를 불러왔습니다."
+                self.customers = Self.repairingDashboardAssignments(
+                    self.customers,
+                    statuses: resolvedDashboardStatuses
+                )
                 return
             }
         } catch {
@@ -89,6 +100,7 @@ public final class NativeAppState: ObservableObject {
             self.groupSmsCampaigns = []
             self.contactExportBatches = []
             self.dashboardStatuses = Self.defaultDashboardStatuses()
+            self.dashboardSettings = DashboardHeatmapSettings()
             self.selectedListId = seed.lists.first?.id
         } else {
             self.customerLists = []
@@ -102,6 +114,7 @@ public final class NativeAppState: ObservableObject {
             self.groupSmsCampaigns = []
             self.contactExportBatches = []
             self.dashboardStatuses = Self.defaultDashboardStatuses()
+            self.dashboardSettings = DashboardHeatmapSettings()
             self.selectedListId = nil
         }
     }
@@ -118,6 +131,10 @@ public final class NativeAppState: ObservableObject {
             [customer.name, customer.phoneNumber, customer.address]
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
+    }
+
+    public var activeDashboardColorPalette: [String] {
+        Self.dashboardColorPalette(for: dashboardSettings.paletteFamily)
     }
 
     public var openCustomerCount: Int {
@@ -398,20 +415,63 @@ public final class NativeAppState: ObservableObject {
 
     public func addDashboardStatus() {
         guard dashboardStatuses.count < 10 else { return }
-        let palette = Self.dashboardColorPalette
-        dashboardStatuses.append(
-            DashboardStatusDefinition(
-                id: UUID().uuidString,
-                name: "새 상태",
-                colorHex: palette[dashboardStatuses.count % palette.count],
-                orderIndex: dashboardStatuses.count
-            )
-        )
+        setDashboardStatusCount(dashboardStatuses.count + 1)
+    }
+
+    public func setDashboardStatusCount(_ requestedCount: Int) {
+        let resolvedCount = min(max(requestedCount, 1), 10)
+        guard resolvedCount != dashboardStatuses.count else { return }
+
+        let now = Date()
+        if resolvedCount < dashboardStatuses.count {
+            let removedIds = Set(dashboardStatuses.dropFirst(resolvedCount).map(\.id))
+            dashboardStatuses = Array(dashboardStatuses.prefix(resolvedCount))
+            if let fallbackId = dashboardStatuses.last?.id {
+                for index in customers.indices where customers[index].dashboardStatusId.map(removedIds.contains) ?? false {
+                    customers[index].dashboardStatusId = fallbackId
+                    customers[index].updatedAt = now
+                }
+            }
+        } else {
+            for index in dashboardStatuses.count..<resolvedCount {
+                dashboardStatuses.append(
+                    DashboardStatusDefinition(
+                        id: UUID().uuidString,
+                        name: "상태 \(index + 1)",
+                        colorHex: activeDashboardColorPalette.last ?? "5B8FF9",
+                        orderIndex: index,
+                        updatedAt: now
+                    )
+                )
+            }
+        }
+
+        dashboardSettings.statusCount = resolvedCount
+        dashboardSettings.updatedAt = now
+        normalizeDashboardStatusOrder(updatedAt: now)
+        applyActiveDashboardPalette(updatedAt: now)
+        persist()
+    }
+
+    public func updateDashboardPaletteFamily(_ family: DashboardPaletteFamily) {
+        let palette = Self.dashboardColorPalette(for: family)
+        let now = Date()
+        dashboardSettings.paletteFamily = family
+        dashboardSettings.updatedAt = now
+        applyDashboardPalette(palette, updatedAt: now)
+        persist()
+    }
+
+    public func setDashboardLegendVisible(_ isVisible: Bool) {
+        guard dashboardSettings.showsLegend != isVisible else { return }
+        dashboardSettings.showsLegend = isVisible
+        dashboardSettings.updatedAt = Date()
         persist()
     }
 
     public func updateDashboardStatus(id: String, name: String? = nil, colorHex: String? = nil) {
         guard let index = dashboardStatuses.firstIndex(where: { $0.id == id }) else { return }
+        let now = Date()
         if let name {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             dashboardStatuses[index].name = trimmed.isEmpty ? "상태 \(index + 1)" : trimmed
@@ -419,13 +479,17 @@ public final class NativeAppState: ObservableObject {
         if let colorHex {
             dashboardStatuses[index].colorHex = colorHex
         }
-        dashboardStatuses[index].updatedAt = Date()
+        dashboardStatuses[index].updatedAt = now
+        dashboardSettings.updatedAt = now
         persist()
     }
 
     public func moveDashboardStatuses(from source: IndexSet, to destination: Int) {
         dashboardStatuses.move(fromOffsets: source, toOffset: destination)
-        normalizeDashboardStatusOrder()
+        let now = Date()
+        dashboardSettings.updatedAt = now
+        normalizeDashboardStatusOrder(updatedAt: now)
+        applyActiveDashboardPalette(updatedAt: now)
         persist()
     }
 
@@ -433,12 +497,16 @@ public final class NativeAppState: ObservableObject {
         guard dashboardStatuses.count - offsets.count >= 1 else { return }
         let removedIds = Set(offsets.compactMap { dashboardStatuses.indices.contains($0) ? dashboardStatuses[$0].id : nil })
         dashboardStatuses.remove(atOffsets: offsets)
-        guard let fallbackId = dashboardStatuses.first?.id else { return }
+        guard let fallbackId = dashboardStatuses.last?.id else { return }
         for index in customers.indices where customers[index].dashboardStatusId.map(removedIds.contains) ?? false {
             customers[index].dashboardStatusId = fallbackId
             customers[index].updatedAt = Date()
         }
-        normalizeDashboardStatusOrder()
+        let now = Date()
+        dashboardSettings.statusCount = dashboardStatuses.count
+        dashboardSettings.updatedAt = now
+        normalizeDashboardStatusOrder(updatedAt: now)
+        applyActiveDashboardPalette(updatedAt: now)
         persist()
     }
 
@@ -1058,7 +1126,12 @@ public final class NativeAppState: ObservableObject {
         messageTemplates = snapshot.messageTemplates.isEmpty ? Self.defaultTemplates() : snapshot.messageTemplates
         groupSmsCampaigns = snapshot.groupSmsCampaigns
         contactExportBatches = snapshot.contactExportBatches
-        dashboardStatuses = snapshot.dashboardStatuses.isEmpty ? Self.defaultDashboardStatuses() : snapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
+        dashboardStatuses = snapshot.dashboardStatuses.isEmpty
+            ? Self.defaultDashboardStatuses()
+            : Self.migratingDefaultDashboardColors(snapshot.dashboardStatuses)
+        dashboardSettings = snapshot.dashboardSettings
+        dashboardSettings.statusCount = dashboardStatuses.count
+        customers = Self.repairingDashboardAssignments(customers, statuses: dashboardStatuses)
         selectedListId = snapshot.selectedListId ?? customerLists.first?.id
     }
 
@@ -1108,8 +1181,11 @@ public final class NativeAppState: ObservableObject {
         contactExportBatches.append(contentsOf: remoteSnapshot.contactExportBatches.filter { selectedListIds.contains($0.customerListId) })
         messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         if !remoteSnapshot.dashboardStatuses.isEmpty {
-            dashboardStatuses = remoteSnapshot.dashboardStatuses.sorted { $0.orderIndex < $1.orderIndex }
+            dashboardStatuses = Self.migratingDefaultDashboardColors(remoteSnapshot.dashboardStatuses)
         }
+        dashboardSettings = remoteSnapshot.dashboardSettings
+        dashboardSettings.statusCount = dashboardStatuses.count
+        customers = Self.repairingDashboardAssignments(customers, statuses: dashboardStatuses)
         selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
 
         let restoredVisitLogs = remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
@@ -1251,6 +1327,7 @@ public final class NativeAppState: ObservableObject {
             groupSmsCampaigns = []
             contactExportBatches = []
             dashboardStatuses = Self.defaultDashboardStatuses()
+            dashboardSettings = DashboardHeatmapSettings()
             selectedListId = seed.lists.first?.id
         } else {
             customerLists = []
@@ -1264,6 +1341,7 @@ public final class NativeAppState: ObservableObject {
             groupSmsCampaigns = []
             contactExportBatches = []
             dashboardStatuses = Self.defaultDashboardStatuses()
+            dashboardSettings = DashboardHeatmapSettings()
             selectedListId = nil
         }
         do {
@@ -1306,6 +1384,7 @@ public final class NativeAppState: ObservableObject {
             },
             contactExportBatches: contactExportBatches.filter { filteredListIds.contains($0.customerListId) },
             dashboardStatuses: dashboardStatuses,
+            dashboardSettings: dashboardSettings,
             selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
     }
@@ -1527,7 +1606,20 @@ public final class NativeAppState: ObservableObject {
         let mergedTemplates = mergeById(remote.snapshot.messageTemplates, local.snapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         let mergedGroupSmsCampaigns = mergeById(remote.snapshot.groupSmsCampaigns, local.snapshot.groupSmsCampaigns) { $0.updatedAt < $1.updatedAt }
         let mergedContactExportBatches = mergeById(remote.snapshot.contactExportBatches, local.snapshot.contactExportBatches) { $0.updatedAt < $1.updatedAt }
-        let mergedDashboardStatuses = mergeById(remote.snapshot.dashboardStatuses, local.snapshot.dashboardStatuses) { $0.updatedAt < $1.updatedAt }
+        let localDashboardSettingsAreNewer = remote.snapshot.dashboardSettings.updatedAt < local.snapshot.dashboardSettings.updatedAt
+        let mergedDashboardSettings = localDashboardSettingsAreNewer
+            ? local.snapshot.dashboardSettings
+            : remote.snapshot.dashboardSettings
+        let settingsHaveNoMergeVersion = remote.snapshot.dashboardSettings.updatedAt == .distantPast
+            && local.snapshot.dashboardSettings.updatedAt == .distantPast
+        let authoritativeDashboardStatuses = localDashboardSettingsAreNewer
+            ? local.snapshot.dashboardStatuses
+            : remote.snapshot.dashboardStatuses
+        let mergedDashboardStatuses = settingsHaveNoMergeVersion || authoritativeDashboardStatuses.isEmpty
+            ? mergeById(remote.snapshot.dashboardStatuses, local.snapshot.dashboardStatuses) { $0.updatedAt < $1.updatedAt }
+            : authoritativeDashboardStatuses
+        var resolvedDashboardSettings = mergedDashboardSettings
+        resolvedDashboardSettings.statusCount = mergedDashboardStatuses.count
         let snapshot = NativeAppSnapshot(
             customerLists: mergedLists,
             customers: mergedCustomers,
@@ -1540,6 +1632,7 @@ public final class NativeAppState: ObservableObject {
             groupSmsCampaigns: mergedGroupSmsCampaigns,
             contactExportBatches: mergedContactExportBatches,
             dashboardStatuses: mergedDashboardStatuses.sorted { $0.orderIndex < $1.orderIndex },
+            dashboardSettings: resolvedDashboardSettings,
             selectedListId: local.snapshot.selectedListId ?? remote.snapshot.selectedListId,
             savedAt: Date()
         )
@@ -1569,30 +1662,114 @@ public final class NativeAppState: ObservableObject {
         return Array(merged.values)
     }
 
-    private func normalizeDashboardStatusOrder() {
+    private func normalizeDashboardStatusOrder(updatedAt: Date) {
         for index in dashboardStatuses.indices {
             dashboardStatuses[index].orderIndex = index
-            dashboardStatuses[index].updatedAt = Date()
+            dashboardStatuses[index].updatedAt = updatedAt
         }
     }
 
-    public static let dashboardColorPalette = [
+    private func applyActiveDashboardPalette(updatedAt: Date) {
+        applyDashboardPalette(activeDashboardColorPalette, updatedAt: updatedAt)
+    }
+
+    private func applyDashboardPalette(_ palette: [String], updatedAt: Date) {
+        for index in dashboardStatuses.indices {
+            dashboardStatuses[index].colorHex = Self.dashboardColor(
+                at: index,
+                statusCount: dashboardStatuses.count,
+                palette: palette
+            )
+            dashboardStatuses[index].updatedAt = updatedAt
+        }
+    }
+
+    public static func dashboardColorPalette(for family: DashboardPaletteFamily) -> [String] {
+        switch family {
+        case .blue:
+            return ["EAF3FF", "D8EAFF", "C2DDFF", "A5CEFF", "7EB7FF", "579EF2", "367FD9", "1F64BE", "124A96", "08366F"]
+        case .green:
+            return ["EAF8EF", "D8F1E2", "BFE7D0", "9CD9B7", "72C496", "4AAA72", "2F8F56", "237443", "185C34", "0E4326"]
+        case .purple:
+            return ["F4EEFF", "E9DDFF", "D8C6FF", "C1A5F7", "A989EB", "8C6AD8", "704FC2", "5939A8", "43287F", "2E1959"]
+        case .orange:
+            return ["FFF4E8", "FFE8CF", "FFD7AD", "FFC17F", "F6A855", "E98C32", "D5721E", "B85A12", "93440C", "6D3007"]
+        case .red:
+            return ["FFEDEE", "FFDADC", "FFC0C4", "FC9DA4", "F47782", "E15462", "C63C4B", "A92B39", "861E2B", "64121D"]
+        case .gray:
+            return ["F5F7FA", "E8EBF0", "D7DCE3", "C1C8D2", "A7B0BD", "8995A5", "6D7989", "535E6C", "3B444F", "252C34"]
+        }
+    }
+
+    private static let legacyDashboardColorPalette = [
         "5B8FF9", "8067DC", "5D9CEC", "22B8A7", "66B86B",
         "B3C83F", "F2C94C", "F2994A", "EB6A5B", "8A94A6",
         "D65DB1", "00A6A6", "7A9E35", "C77D31", "9B6BCE"
     ]
 
+    private static func migratingDefaultDashboardColors(
+        _ statuses: [DashboardStatusDefinition]
+    ) -> [DashboardStatusDefinition] {
+        let legacyColors = Set(legacyDashboardColorPalette)
+        let migrationDate = Date()
+        let sortedStatuses = statuses.sorted { $0.orderIndex < $1.orderIndex }
+        let bluePalette = dashboardColorPalette(for: .blue)
+
+        return sortedStatuses.map { status in
+            let normalizedColor = status.colorHex.uppercased()
+            guard status.id.hasPrefix("dashboard-status-"),
+                  legacyColors.contains(normalizedColor) else {
+                return status
+            }
+
+            var migrated = status
+            migrated.colorHex = dashboardColor(
+                at: status.orderIndex,
+                statusCount: sortedStatuses.count,
+                palette: bluePalette
+            )
+            migrated.updatedAt = migrationDate
+            return migrated
+        }
+    }
+
     private static func defaultDashboardStatuses() -> [DashboardStatusDefinition] {
-        let names = ["신규", "첫 연락 대기", "첫 연락 완료", "니즈 확인", "제안 준비", "제안 완료", "검토 중", "후속 연락", "계약 완료", "보류·종료"]
+        let names = ["신규", "연락 대기", "상담 진행", "후속 관리", "완료"]
+        let palette = dashboardColorPalette(for: .blue)
         let now = Date()
         return names.enumerated().map { index, name in
             DashboardStatusDefinition(
                 id: "dashboard-status-\(index + 1)",
                 name: name,
-                colorHex: dashboardColorPalette[index],
+                colorHex: dashboardColor(at: index, statusCount: names.count, palette: palette),
                 orderIndex: index,
                 updatedAt: now
             )
+        }
+    }
+
+    private static func dashboardColor(at index: Int, statusCount: Int, palette: [String]) -> String {
+        guard let first = palette.first else { return "5B8FF9" }
+        guard statusCount > 1 else { return first }
+        let position = Double(index) * Double(palette.count - 1) / Double(statusCount - 1)
+        return palette[min(max(Int(position.rounded()), 0), palette.count - 1)]
+    }
+
+    private static func repairingDashboardAssignments(
+        _ customers: [Customer],
+        statuses: [DashboardStatusDefinition]
+    ) -> [Customer] {
+        let validStatusIds = Set(statuses.map(\.id))
+        guard let fallbackStatusId = statuses.last?.id else { return customers }
+
+        return customers.map { customer in
+            guard let statusId = customer.dashboardStatusId,
+                  !validStatusIds.contains(statusId) else {
+                return customer
+            }
+            var repaired = customer
+            repaired.dashboardStatusId = fallbackStatusId
+            return repaired
         }
     }
 

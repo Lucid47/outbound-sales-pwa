@@ -8,10 +8,10 @@ struct ProcessDashboardView: View {
     @State private var currentPage = 0
     @State private var selectedCustomer: Customer?
     @State private var showingStatusSettings = false
-    @State private var showingLegend = true
 
     private let pageSize = 100
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 10)
+    private let gridDimension = 10
+    private let gridSpacing: CGFloat = 2
 
     private var customers: [Customer] {
         state.visibleCustomers
@@ -29,17 +29,30 @@ struct ProcessDashboardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            summaryHeader
-            if showingLegend {
-                statusLegend
-                    .transition(.move(edge: .top).combined(with: .opacity))
+        GeometryReader { proxy in
+            let isLandscape = proxy.size.width > proxy.size.height
+
+            Group {
+                if isLandscape {
+                    heatmapBoard
+                        .padding(2)
+                } else {
+                    VStack(spacing: 8) {
+                        summaryHeader
+                        if state.dashboardSettings.showsLegend {
+                            statusLegend
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        heatmapBoard
+                        pageControls
+                    }
+                    .padding(.horizontal, horizontalSizeClass == .regular ? 24 : 10)
+                    .padding(.bottom, 8)
+                }
             }
-            heatmapBoard
-            pageControls
+            .toolbar(isLandscape ? .hidden : .visible, for: .navigationBar)
+            .statusBarHidden(isLandscape)
         }
-        .padding(.horizontal, horizontalSizeClass == .regular ? 24 : 10)
-        .padding(.bottom, 8)
         .background(AppPalette.pageBackground)
         .navigationTitle("고객 프로세스")
         .modifier(InlineNavigationTitleModifier())
@@ -53,7 +66,9 @@ struct ProcessDashboardView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button {
-                    withAnimation(.snappy) { showingLegend.toggle() }
+                    withAnimation(.snappy) {
+                        state.setDashboardLegendVisible(!state.dashboardSettings.showsLegend)
+                    }
                 } label: {
                     Label("상태 범례", systemImage: "paintpalette")
                 }
@@ -128,9 +143,18 @@ struct ProcessDashboardView: View {
 
     private var heatmapBoard: some View {
         GeometryReader { proxy in
+            let isLandscape = proxy.size.width > proxy.size.height
             let boardSide = max(0, min(proxy.size.width, proxy.size.height))
+            let boardWidth = isLandscape ? proxy.size.width : boardSide
+            let boardHeight = isLandscape ? proxy.size.height : boardSide
+            let totalRowSpacing = gridSpacing * CGFloat(gridDimension - 1)
+            let rowHeight = max(1, (boardHeight - totalRowSpacing) / CGFloat(gridDimension))
+            let columns = Array(
+                repeating: GridItem(.flexible(minimum: 1), spacing: gridSpacing),
+                count: gridDimension
+            )
 
-            LazyVGrid(columns: columns, spacing: 2) {
+            LazyVGrid(columns: columns, spacing: gridSpacing) {
                 ForEach(0..<pageSize, id: \.self) { index in
                     if index < pageCustomers.count {
                         let customer = pageCustomers[index]
@@ -138,15 +162,18 @@ struct ProcessDashboardView: View {
                             customer: customer,
                             status: state.dashboardStatus(for: customer),
                             statusNumber: statusNumber(for: customer),
-                            elapsedDays: elapsedDays(for: customer)
+                            elapsedDays: elapsedDays(for: customer),
+                            isLandscape: isLandscape
                         )
+                        .frame(height: rowHeight)
                         .onTapGesture { selectedCustomer = customer }
                     } else {
                         EmptyProcessHeatCell()
+                            .frame(height: rowHeight)
                     }
                 }
             }
-            .frame(width: boardSide, height: boardSide)
+            .frame(width: boardWidth, height: boardHeight, alignment: .top)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .contentShape(Rectangle())
             .gesture(pageSwipeGesture)
@@ -229,34 +256,44 @@ private struct ProcessHeatCell: View {
     let status: DashboardStatusDefinition?
     let statusNumber: Int?
     let elapsedDays: Int?
+    let isLandscape: Bool
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(DashboardColor.color(hex: status?.colorHex ?? "A8B1BE"))
+        GeometryReader { proxy in
+            let colorHex = status?.colorHex ?? "A8B1BE"
+            let foregroundColor = DashboardColor.foregroundColor(hex: colorHex)
+            let displayName = customer.name.isEmpty ? "이름없음" : customer.name
+            let elapsedText = elapsedDays.map(String.init) ?? "–"
+            let primaryFontSize = min(
+                isLandscape ? 30 : 16,
+                max(9, proxy.size.height * (isLandscape ? 0.62 : 0.4))
+            )
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(DashboardColor.color(hex: colorHex))
 
-            VStack(spacing: 0) {
-                Text(String((customer.name.isEmpty ? "이름없음" : customer.name).prefix(3)))
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text(elapsedDays.map { "\($0)" } ?? "–")
-                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                Text("\(displayName) \(elapsedText)")
+                    .font(.system(
+                        size: primaryFontSize,
+                        weight: isLandscape ? .black : .bold,
+                        design: .rounded
+                    ))
                     .monospacedDigit()
-                    .opacity(0.72)
-            }
-            .foregroundStyle(.black.opacity(0.76))
-            .padding(2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.45)
+                    .foregroundStyle(foregroundColor.opacity(0.9))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if let statusNumber {
-                Text("\(statusNumber)")
-                    .font(.system(size: 6, weight: .bold, design: .rounded))
-                    .foregroundStyle(.black.opacity(0.56))
-                    .padding(2)
+                if let statusNumber {
+                    Text("\(statusNumber)")
+                        .font(.system(size: 6, weight: .bold, design: .rounded))
+                        .foregroundStyle(foregroundColor.opacity(0.68))
+                        .padding(2)
+                }
             }
         }
-        .aspectRatio(1, contentMode: .fit)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(customer.name), \(status?.name ?? "상태 없음"), 마지막 터치 \(elapsedDays.map { "\($0)일 전" } ?? "기록 없음")")
@@ -272,7 +309,6 @@ private struct EmptyProcessHeatCell: View {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .strokeBorder(Color.secondary.opacity(0.14), style: StrokeStyle(lineWidth: 0.7, dash: [2, 2]))
             }
-            .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
     }
 }
@@ -325,16 +361,17 @@ private struct DashboardCustomerSheet: View {
 
     private func customerHeader(_ customer: Customer) -> some View {
         let status = state.dashboardStatus(for: customer)
+        let colorHex = status?.colorHex ?? "A8B1BE"
         let latest = state.latestTouchDate(for: customer)
         let days = latest.map { max(0, Calendar.current.dateComponents([.day], from: $0, to: Date()).day ?? 0) }
         return HStack(spacing: 14) {
             Circle()
-                .fill(DashboardColor.color(hex: status?.colorHex ?? "A8B1BE"))
+                .fill(DashboardColor.color(hex: colorHex))
                 .frame(width: 58, height: 58)
                 .overlay {
                     Text(String((customer.name.isEmpty ? "?" : customer.name).prefix(1)))
                         .font(.title2.bold())
-                        .foregroundStyle(.black.opacity(0.7))
+                        .foregroundStyle(DashboardColor.foregroundColor(hex: colorHex).opacity(0.86))
                 }
             VStack(alignment: .leading, spacing: 4) {
                 Text(customer.name.isEmpty ? "이름 없음" : customer.name)
@@ -432,10 +469,88 @@ private struct DashboardCustomerSheet: View {
 private struct DashboardStatusSettingsView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.dismiss) private var dismiss
+    @State private var pendingReducedStatusCount: Int?
+    @State private var showingStatusCountReductionConfirmation = false
 
     var body: some View {
         NavigationStack {
             List {
+                Section("상태 개수") {
+                    Stepper(
+                        value: Binding(
+                            get: { state.dashboardSettings.statusCount },
+                            set: { newCount in
+                                if newCount < state.dashboardStatuses.count {
+                                    pendingReducedStatusCount = newCount
+                                    showingStatusCountReductionConfirmation = true
+                                } else {
+                                    state.setDashboardStatusCount(newCount)
+                                }
+                            }
+                        ),
+                        in: 1...10
+                    ) {
+                        HStack {
+                            Label("프로세스 단계", systemImage: "square.grid.3x3")
+                            Spacer()
+                            Text("\(state.dashboardSettings.statusCount)개")
+                                .font(.body.monospacedDigit().bold())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Section("색상 계열") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(DashboardPaletteFamily.allCases, id: \.rawValue) { family in
+                                Button {
+                                    withAnimation(.snappy) {
+                                        state.updateDashboardPaletteFamily(family)
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        HStack(spacing: 2) {
+                                            ForEach(NativeAppState.dashboardColorPalette(for: family), id: \.self) { hex in
+                                                Rectangle()
+                                                    .fill(DashboardColor.color(hex: hex))
+                                                    .frame(width: 8, height: 16)
+                                            }
+                                        }
+                                        HStack(spacing: 5) {
+                                            Text(family.displayName)
+                                                .font(.caption.bold())
+                                            if state.dashboardSettings.paletteFamily == family {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.tint)
+                                            }
+                                        }
+                                    }
+                                    .padding(9)
+                                    .background(
+                                        state.dashboardSettings.paletteFamily == family
+                                            ? Color.accentColor.opacity(0.12)
+                                            : AppPalette.cardBackground,
+                                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    )
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .strokeBorder(
+                                                state.dashboardSettings.paletteFamily == family
+                                                    ? Color.accentColor.opacity(0.7)
+                                                    : Color.secondary.opacity(0.16),
+                                                lineWidth: 1
+                                            )
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+
                 Section {
                     ForEach(Array(state.dashboardStatuses.enumerated()), id: \.element.id) { index, status in
                         VStack(alignment: .leading, spacing: 10) {
@@ -458,7 +573,7 @@ private struct DashboardStatusSettingsView: View {
                             }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 10) {
-                                    ForEach(NativeAppState.dashboardColorPalette, id: \.self) { hex in
+                                    ForEach(state.activeDashboardColorPalette, id: \.self) { hex in
                                         Button {
                                             state.updateDashboardStatus(id: status.id, colorHex: hex)
                                         } label: {
@@ -469,7 +584,7 @@ private struct DashboardStatusSettingsView: View {
                                                     if status.colorHex == hex {
                                                         Image(systemName: "checkmark")
                                                             .font(.caption.bold())
-                                                            .foregroundStyle(.black.opacity(0.65))
+                                                            .foregroundStyle(DashboardColor.foregroundColor(hex: hex).opacity(0.85))
                                                     }
                                                 }
                                         }
@@ -489,14 +604,6 @@ private struct DashboardStatusSettingsView: View {
                     Text("순서, 이름과 색상 변경은 히트맵과 고객 팝업에 즉시 반영됩니다.")
                 }
 
-                Section {
-                    Button {
-                        state.addDashboardStatus()
-                    } label: {
-                        Label("상태 추가", systemImage: "plus.circle.fill")
-                    }
-                    .disabled(state.dashboardStatuses.count >= 10)
-                }
             }
             .navigationTitle("상태 설정")
             .modifier(InlineNavigationTitleModifier())
@@ -508,6 +615,32 @@ private struct DashboardStatusSettingsView: View {
                     Button("완료") { dismiss() }
                 }
             }
+            .alert("상태 개수를 줄일까요?", isPresented: $showingStatusCountReductionConfirmation) {
+                Button("취소", role: .cancel) {
+                    pendingReducedStatusCount = nil
+                }
+                Button("줄이기", role: .destructive) {
+                    if let pendingReducedStatusCount {
+                        state.setDashboardStatusCount(pendingReducedStatusCount)
+                    }
+                    self.pendingReducedStatusCount = nil
+                }
+            } message: {
+                Text("제거되는 단계의 고객은 새 마지막 단계로 이동합니다.")
+            }
+        }
+    }
+}
+
+private extension DashboardPaletteFamily {
+    var displayName: String {
+        switch self {
+        case .blue: "파랑"
+        case .green: "초록"
+        case .purple: "보라"
+        case .orange: "주황"
+        case .red: "빨강"
+        case .gray: "회색"
         }
     }
 }
@@ -524,13 +657,24 @@ private struct InlineNavigationTitleModifier: ViewModifier {
 
 private enum DashboardColor {
     static func color(hex: String) -> Color {
+        let components = components(hex: hex)
+        return Color(red: components.red, green: components.green, blue: components.blue)
+    }
+
+    static func foregroundColor(hex: String) -> Color {
+        let components = components(hex: hex)
+        let brightness = (components.red * 0.299) + (components.green * 0.587) + (components.blue * 0.114)
+        return brightness < 0.52 ? .white : .black
+    }
+
+    private static func components(hex: String) -> (red: Double, green: Double, blue: Double) {
         let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
         var value: UInt64 = 0
         Scanner(string: clean).scanHexInt64(&value)
-        return Color(
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255
+        return (
+            Double((value >> 16) & 0xFF) / 255,
+            Double((value >> 8) & 0xFF) / 255,
+            Double(value & 0xFF) / 255
         )
     }
 }

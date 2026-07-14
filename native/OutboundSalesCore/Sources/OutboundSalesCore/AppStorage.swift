@@ -13,6 +13,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var groupSmsCampaigns: [GroupSmsCampaign]
     public var contactExportBatches: [ContactExportBatch]
     public var dashboardStatuses: [DashboardStatusDefinition]
+    public var dashboardSettings: DashboardHeatmapSettings
     public var selectedListId: String?
     public var savedAt: Date
 
@@ -29,6 +30,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         groupSmsCampaigns: [GroupSmsCampaign] = [],
         contactExportBatches: [ContactExportBatch] = [],
         dashboardStatuses: [DashboardStatusDefinition] = [],
+        dashboardSettings: DashboardHeatmapSettings = DashboardHeatmapSettings(),
         selectedListId: String?,
         savedAt: Date = Date()
     ) {
@@ -44,6 +46,7 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.groupSmsCampaigns = groupSmsCampaigns
         self.contactExportBatches = contactExportBatches
         self.dashboardStatuses = dashboardStatuses
+        self.dashboardSettings = dashboardSettings
         self.selectedListId = selectedListId
         self.savedAt = savedAt
     }
@@ -62,6 +65,8 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.groupSmsCampaigns = try container.decodeIfPresent([GroupSmsCampaign].self, forKey: .groupSmsCampaigns) ?? []
         self.contactExportBatches = try container.decodeIfPresent([ContactExportBatch].self, forKey: .contactExportBatches) ?? []
         self.dashboardStatuses = try container.decodeIfPresent([DashboardStatusDefinition].self, forKey: .dashboardStatuses) ?? []
+        self.dashboardSettings = try container.decodeIfPresent(DashboardHeatmapSettings.self, forKey: .dashboardSettings)
+            ?? DashboardHeatmapSettings(updatedAt: .distantPast)
         self.selectedListId = try container.decodeIfPresent(String.self, forKey: .selectedListId)
         self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt) ?? Date()
     }
