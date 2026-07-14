@@ -389,6 +389,171 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(table.rows[2][0].text, "신나리")
     }
 
+    func testBuildsElevenOCRColumnsWithoutLegacyEightColumnBias() {
+        let headers = (0..<11).map { columnIndex in
+            ocrBox("헤더\(columnIndex + 1)", x: 0.03 + (Double(columnIndex) * 0.085), y: 0.04, width: 0.045)
+        }
+        let body = (0..<4).flatMap { rowIndex in
+            (0..<11).map { columnIndex in
+                ocrBox(
+                    "값\(rowIndex + 1)-\(columnIndex + 1)",
+                    x: 0.03 + (Double(columnIndex) * 0.085),
+                    y: 0.12 + (Double(rowIndex) * 0.05),
+                    width: 0.045
+                )
+            }
+        }
+
+        let table = buildOCRTable(from: headers + body)
+
+        XCTAssertEqual(table.columnCount, 11)
+        XCTAssertEqual(table.rows.count, 5)
+        XCTAssertEqual(table.rows[0].map(\.text), (1...11).map { "헤더\($0)" })
+        XCTAssertEqual(table.rows[4].last?.text, "값4-11")
+    }
+
+    func testKeepsOverlappingMultilineNoteWithPreviousCustomer() {
+        let boxes = [
+            ocrBox("담당자", x: 0.08, y: 0.03, width: 0.05),
+            ocrBox("성명", x: 0.36, y: 0.03, width: 0.05),
+            ocrBox("비고", x: 0.72, y: 0.03, width: 0.05),
+            ocrBox("박민아", x: 0.08, y: 0.10, width: 0.05),
+            ocrBox("박철성", x: 0.36, y: 0.10, width: 0.05),
+            ocrBox("투자 목적 / 본인에게 연락하지 말 것", x: 0.72, y: 0.10, width: 0.22, height: 0.035),
+            ocrBox("부인 장윤진이 관리", x: 0.72, y: 0.123, width: 0.15, height: 0.024),
+            ocrBox("박민아", x: 0.08, y: 0.14, width: 0.05),
+            ocrBox("김학재", x: 0.36, y: 0.14, width: 0.05),
+            ocrBox("박민아", x: 0.08, y: 0.19, width: 0.05),
+            ocrBox("고재준", x: 0.36, y: 0.19, width: 0.05)
+        ]
+
+        let table = buildOCRTable(from: boxes)
+
+        XCTAssertEqual(table.rows.count, 4)
+        XCTAssertEqual(table.rows[1][2].text, "투자 목적 / 본인에게 연락하지 말 것 부인 장윤진이 관리")
+        XCTAssertEqual(table.rows[2][2].text, "")
+    }
+
+    func testDetectsSyntheticPrintedTableGrid() throws {
+        let width = 600
+        let height = 420
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return XCTFail("합성 표 컨텍스트를 만들지 못했습니다.")
+        }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setStrokeColor(CGColor(gray: 0.05, alpha: 1))
+        context.setLineWidth(2)
+        for x in [40, 150, 280, 430, 560] {
+            context.move(to: CGPoint(x: x, y: 35))
+            context.addLine(to: CGPoint(x: x, y: 385))
+        }
+        for y in [35, 105, 175, 245, 315, 385] {
+            context.move(to: CGPoint(x: 40, y: y))
+            context.addLine(to: CGPoint(x: 560, y: y))
+        }
+        context.strokePath()
+        guard let image = context.makeImage() else {
+            return XCTFail("합성 표 이미지를 만들지 못했습니다.")
+        }
+
+        let grid = detectOCRTableGrid(in: image, maximumDimension: 600)
+
+        XCTAssertNotNil(grid)
+        XCTAssertEqual(grid?.columnCount, 4)
+        XCTAssertEqual(grid?.rowCount, 5)
+        XCTAssertGreaterThanOrEqual(grid?.confidence ?? 0, 0.45)
+    }
+
+    func testNormalizesRepeatedColumnsAcrossPerspectiveWarp() {
+        var boxes: [RecognizedTextBox] = []
+        for row in 0..<10 {
+            let anchorY = 0.10 + (Double(row) * 0.055)
+            boxes.append(ocrBox("\(row + 1) 고객", x: 0.10, y: anchorY))
+            boxes.append(ocrBox("010000000\(row)", x: 0.32, y: anchorY + (Double(row) * 0.0015)))
+            boxes.append(ocrBox("\(row + 1)00,000", x: 0.68, y: anchorY + (Double(row) * 0.003)))
+        }
+
+        let normalized = normalizeRepeatedColumnRows(boxes)
+        let groups = Dictionary(grouping: normalized) { Int(($0.x * 100).rounded()) }
+        let anchorCenters = groups[10]!.sorted { $0.centerY < $1.centerY }.map(\.centerY)
+        let amountCenters = groups[68]!.sorted { $0.centerY < $1.centerY }.map(\.centerY)
+
+        XCTAssertEqual(anchorCenters.count, 10)
+        XCTAssertEqual(amountCenters.count, 10)
+        for (anchor, amount) in zip(anchorCenters, amountCenters) {
+            XCTAssertEqual(anchor, amount, accuracy: 0.000_001)
+        }
+    }
+
+    func testRestoresReverseReadingDirectionFromDateAndNameColumns() {
+        let names = ["가나다", "라마바", "사아자", "차카타", "파하가", "나라다", "마바사", "아자차"]
+        let logicalRows = (1...8).map { rowIndex in
+            [
+                names[rowIndex - 1],
+                "0100000000\(rowIndex)",
+                "상품 이름 \(rowIndex)",
+                "정상",
+                "2026.7.\(rowIndex)",
+                "\(rowIndex * 10),000"
+            ]
+        }
+        let reversedRows = logicalRows.reversed().enumerated().map { rowIndex, texts in
+            texts.reversed().enumerated().map { columnIndex, text in
+                OcrCell(
+                    text: text,
+                    boxes: [],
+                    rowIndex: rowIndex,
+                    columnIndex: columnIndex,
+                    confidence: 1
+                )
+            }
+        }
+        let table = OcrTable(rows: reversedRows, columnCount: 6, warnings: [])
+
+        let normalized = normalizeOCRTableReadingDirection(table)
+
+        XCTAssertEqual(normalized.rows[0][0].text, "가나다")
+        XCTAssertEqual(normalized.rows[7][0].text, "아자차")
+        XCTAssertEqual(normalized.rows[0][4].text, "2026.7.1")
+        XCTAssertTrue(normalized.warnings.contains { $0.contains("180도 역방향") })
+    }
+
+    func testKeepsBodyLikeFirstRowWhenAutomaticHeaderDetectionIsEnabled() {
+        let sourceRows = [
+            ["첫고객", "01012345678", "긴 상품 설명과 추가 인식 문자열", "정상", "2026.7.1", "1,234,000"],
+            ["둘고객", "01023456789", "상품", "완납", "2026.7.2", "234,000"],
+            ["셋고객", "01034567890", "상품", "정상", "2026.7.3", "345,000"]
+        ]
+        let rows = sourceRows.enumerated().map { rowIndex, texts in
+            texts.enumerated().map { columnIndex, text in
+                OcrCell(
+                    text: text,
+                    boxes: [],
+                    rowIndex: rowIndex,
+                    columnIndex: columnIndex,
+                    confidence: 1
+                )
+            }
+        }
+        let table = OcrTable(rows: rows, columnCount: 6, warnings: [])
+
+        let csv = makeOCRCSV(from: table, headers: [], headerMode: .auto)
+
+        XCTAssertFalse(csv.headerDetected)
+        XCTAssertEqual(csv.headerSource, "generated")
+        XCTAssertEqual(csv.dataRows.count, 3)
+        XCTAssertEqual(csv.dataRows[0][0].text, "첫고객")
+    }
+
     func testSavesAndLoadsNativeSnapshot() throws {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -536,13 +701,19 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(decoded.customers.first?.contactRegistrationStatus, .registered)
     }
 
-    private func ocrBox(_ text: String, x: Double, y: Double) -> RecognizedTextBox {
+    private func ocrBox(
+        _ text: String,
+        x: Double,
+        y: Double,
+        width: Double = 0.08,
+        height: Double = 0.010
+    ) -> RecognizedTextBox {
         RecognizedTextBox(
             text: text,
             x: x,
             y: y,
-            width: 0.08,
-            height: 0.010,
+            width: width,
+            height: height,
             confidence: 0.95,
             sourceLevel: "test"
         )

@@ -25,6 +25,7 @@ dist-ssr
 *.sw?
 
 # OCR local tool outputs and private samples
+/ocr-output/
 tools/customer-list-ocr-cli/.build/
 tools/customer-list-ocr-cli/ocr-output/
 tools/customer-list-ocr-cli/test-data/private/
