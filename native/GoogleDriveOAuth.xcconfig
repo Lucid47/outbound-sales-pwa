@@ -1,0 +1,5 @@
+// Shared defaults. The optional local file is ignored by Git.
+GOOGLE_DRIVE_OAUTH_CLIENT_ID =
+GOOGLE_DRIVE_REDIRECT_SCHEME = com.lucid47.outboundsales
+
+#include? ".google-drive-oauth.local"

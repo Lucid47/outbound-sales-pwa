@@ -47,6 +47,17 @@
   - 상태 개수, 색상 계열, 범례 표시 여부, 상태 이름·순서·개별 색상을 로컬 JSON과 Google Drive 전체·선택 백업에 포함
   - 기기간 동기화 시 수정 시각을 기준으로 최신 히트맵 설정을 병합하고 이전 백업 파일은 파랑 계열 기본값으로 호환
 
+- Google Drive 반복 로그인 문제 수정
+  - 최초 OAuth 연결에서 발급된 refresh token을 iOS Keychain에 기기 전용 정책으로 저장
+  - access token이 유효한 동안 재사용하고 만료 시 refresh token으로 조용히 자동 갱신
+  - 전체 동기화, 전체 저장, Drive 복원, 일반 백업 생성에서 매번 웹 로그인 세션을 열던 흐름 제거
+  - 계정 표시 정보만 남은 기존 설치는 업데이트 후 한 번 재연결하도록 안내
+  - Google 권한 철회로 refresh token이 무효화되면 연결 상태를 정리하고 재연결 안내
+
+- Google Drive OAuth 로컬 설정을 Xcode 직접 빌드에도 자동 주입
+  - 전용 스크립트를 우회한 빌드에서 Client ID가 비어 동기화가 비활성화되던 문제 수정
+  - 실제 Client ID는 기존처럼 Git 제외 로컬 파일에만 보관
+
 - 단체문자 완료 후 앱 자동 복귀 안정화
   - 일반 Xcode 빌드에서도 `com.lucid47.outboundsales` callback scheme을 항상 등록
   - Shortcuts 완료 callback을 받지 못한 캠페인에 완료·취소·진단 복구 메뉴 제공

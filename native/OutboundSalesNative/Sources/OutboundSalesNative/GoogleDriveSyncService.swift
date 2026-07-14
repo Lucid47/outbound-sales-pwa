@@ -18,7 +18,13 @@ public struct GoogleDriveAccount: Codable, Equatable, Sendable {
 
 struct GoogleDriveToken: Sendable {
     var accessToken: String
-    var expiresIn: Int?
+    var refreshToken: String?
+    var expiresAt: Date
+    var scopes: Set<String>
+
+    func isValid(for requiredScopes: Set<String>, now: Date = Date()) -> Bool {
+        expiresAt.timeIntervalSince(now) > 60 && requiredScopes.isSubset(of: scopes)
+    }
 }
 
 struct GoogleDriveFile: Decodable, Sendable {
@@ -27,13 +33,42 @@ struct GoogleDriveFile: Decodable, Sendable {
     var modifiedTime: String?
 }
 
-enum GoogleDriveSyncError: Error {
+enum GoogleDriveSyncError: LocalizedError {
     case missingClientId
     case missingAuthCode
     case invalidURL
     case tokenRequestFailed
+    case tokenRefreshFailed
+    case authorizationRequired
+    case missingRefreshToken
+    case credentialStoreFailed(Int32)
     case profileRequestFailed
     case driveRequestFailed(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingClientId:
+            return "Google iOS OAuth Client ID가 앱에 포함되지 않았습니다."
+        case .missingAuthCode:
+            return "Google 인증 응답에서 승인 코드를 받지 못했습니다."
+        case .invalidURL:
+            return "Google 인증 또는 Drive 요청 주소를 만들지 못했습니다."
+        case .tokenRequestFailed:
+            return "Google 인증 토큰을 발급받지 못했습니다."
+        case .tokenRefreshFailed:
+            return "Google 인증을 자동 갱신하지 못했습니다. 잠시 후 다시 시도하세요."
+        case .authorizationRequired:
+            return "Google 계정 연결이 만료되었습니다. 계정을 한 번 다시 연결하세요."
+        case .missingRefreshToken:
+            return "장기 인증 정보를 받지 못했습니다. Google 계정을 다시 연결하세요."
+        case let .credentialStoreFailed(status):
+            return "Google 인증 정보를 안전하게 저장하지 못했습니다. (Keychain \(status))"
+        case .profileRequestFailed:
+            return "Google 계정 정보를 확인하지 못했습니다."
+        case let .driveRequestFailed(statusCode):
+            return "Google 서버 요청에 실패했습니다. (HTTP \(statusCode))"
+        }
+    }
 }
 
 final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationContextProviding {
@@ -50,7 +85,9 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let credentialStore = GoogleDriveCredentialStore()
     private var webAuthSession: ASWebAuthenticationSession?
+    private var cachedToken: GoogleDriveToken?
 
     override init() {
         self.encoder = JSONEncoder()
@@ -63,6 +100,14 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
 
     var isConfigured: Bool {
         !clientId.isEmpty
+    }
+
+    var hasStoredAuthorization: Bool {
+        credentialStore.hasCredential
+    }
+
+    static var hasStoredAuthorization: Bool {
+        GoogleDriveCredentialStore().hasCredential
     }
 
     private var clientId: String {
@@ -84,8 +129,19 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
     }
 
     func connect() async throws -> GoogleDriveAccount {
-        let token = try await authorize(scopes: Self.profileScopes + Self.appDataScopes + Self.fileScopes, prompt: "consent")
+        let requestedScopes = Self.profileScopes + Self.appDataScopes + Self.fileScopes
+        let token = try await authorizeInteractively(scopes: requestedScopes, prompt: "consent")
         let profile = try await userProfile(accessToken: token.accessToken)
+        guard let refreshToken = token.refreshToken else {
+            throw GoogleDriveSyncError.missingRefreshToken
+        }
+        try credentialStore.save(
+            GoogleDriveCredential(
+                refreshToken: refreshToken,
+                scopes: Array(token.scopes).sorted()
+            )
+        )
+        cachedToken = token
         return GoogleDriveAccount(
             email: profile.email,
             name: profile.name,
@@ -94,7 +150,32 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
         )
     }
 
-    func authorize(scopes: [String], prompt: String? = nil) async throws -> GoogleDriveToken {
+    func accessToken(for scopes: [String]) async throws -> String {
+        guard !clientId.isEmpty else { throw GoogleDriveSyncError.missingClientId }
+        let requiredScopes = Set(scopes)
+        if let cachedToken, cachedToken.isValid(for: requiredScopes) {
+            return cachedToken.accessToken
+        }
+
+        guard let credential = try credentialStore.load() else {
+            throw GoogleDriveSyncError.authorizationRequired
+        }
+        let grantedScopes = Set(credential.scopes)
+        guard requiredScopes.isSubset(of: grantedScopes) else {
+            throw GoogleDriveSyncError.authorizationRequired
+        }
+
+        let token = try await refreshAccessToken(credential: credential)
+        cachedToken = token
+        return token.accessToken
+    }
+
+    func clearAuthorization() {
+        cachedToken = nil
+        try? credentialStore.delete()
+    }
+
+    private func authorizeInteractively(scopes: [String], prompt: String? = nil) async throws -> GoogleDriveToken {
         guard !clientId.isEmpty else { throw GoogleDriveSyncError.missingClientId }
         let verifier = Self.randomCodeVerifier()
         let challenge = Self.codeChallenge(for: verifier)
@@ -122,7 +203,7 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
             .value else {
             throw GoogleDriveSyncError.missingAuthCode
         }
-        return try await exchangeCode(code, verifier: verifier)
+        return try await exchangeCode(code, verifier: verifier, requestedScopes: Set(scopes))
     }
 
     func findAppDataSyncFile(accessToken: String) async throws -> GoogleDriveFile? {
@@ -216,7 +297,7 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
         }
     }
 
-    private func exchangeCode(_ code: String, verifier: String) async throws -> GoogleDriveToken {
+    private func exchangeCode(_ code: String, verifier: String, requestedScopes: Set<String>) async throws -> GoogleDriveToken {
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -228,10 +309,64 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
             "redirect_uri": redirectURI
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validate(response)
-        let token = try decoder.decode(TokenResponse.self, from: data)
-        guard let accessToken = token.accessToken else { throw GoogleDriveSyncError.tokenRequestFailed }
-        return GoogleDriveToken(accessToken: accessToken, expiresIn: token.expiresIn)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode),
+              let token = try? decoder.decode(TokenResponse.self, from: data),
+              let accessToken = token.accessToken else {
+            throw GoogleDriveSyncError.tokenRequestFailed
+        }
+        return GoogleDriveToken(
+            accessToken: accessToken,
+            refreshToken: token.refreshToken,
+            expiresAt: Self.expirationDate(expiresIn: token.expiresIn),
+            scopes: Self.scopes(from: token.scope, fallback: requestedScopes)
+        )
+    }
+
+    private func refreshAccessToken(credential: GoogleDriveCredential) async throws -> GoogleDriveToken {
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        request.httpBody = formURLEncoded([
+            "client_id": clientId,
+            "refresh_token": credential.refreshToken,
+            "grant_type": "refresh_token"
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GoogleDriveSyncError.tokenRefreshFailed
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            if let oauthError = try? decoder.decode(OAuthErrorResponse.self, from: data),
+               oauthError.error == "invalid_grant" {
+                clearAuthorization()
+                throw GoogleDriveSyncError.authorizationRequired
+            }
+            throw GoogleDriveSyncError.tokenRefreshFailed
+        }
+
+        guard let responseToken = try? decoder.decode(TokenResponse.self, from: data),
+              let accessToken = responseToken.accessToken else {
+            throw GoogleDriveSyncError.tokenRefreshFailed
+        }
+
+        let scopes = Self.scopes(from: responseToken.scope, fallback: Set(credential.scopes))
+        let refreshToken = responseToken.refreshToken ?? credential.refreshToken
+        if responseToken.refreshToken != nil || scopes != Set(credential.scopes) {
+            try credentialStore.save(
+                GoogleDriveCredential(
+                    refreshToken: refreshToken,
+                    scopes: Array(scopes).sorted()
+                )
+            )
+        }
+        return GoogleDriveToken(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: Self.expirationDate(expiresIn: responseToken.expiresIn),
+            scopes: scopes
+        )
     }
 
     private func userProfile(accessToken: String) async throws -> UserInfoResponse {
@@ -332,15 +467,98 @@ final class GoogleDriveSyncService: NSObject, ASWebAuthenticationPresentationCon
         }
         return trimmed
     }
+
+    private static func expirationDate(expiresIn: Int?) -> Date {
+        Date().addingTimeInterval(TimeInterval(max(expiresIn ?? 3600, 60)))
+    }
+
+    private static func scopes(from value: String?, fallback: Set<String>) -> Set<String> {
+        guard let value, !value.isEmpty else { return fallback }
+        return Set(value.split(whereSeparator: \.isWhitespace).map(String.init))
+    }
 }
 
 private struct TokenResponse: Decodable {
     var accessToken: String?
+    var refreshToken: String?
     var expiresIn: Int?
+    var scope: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
+        case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
+        case scope
+    }
+}
+
+private struct OAuthErrorResponse: Decodable {
+    var error: String
+}
+
+private struct GoogleDriveCredential: Codable {
+    var refreshToken: String
+    var scopes: [String]
+}
+
+private struct GoogleDriveCredentialStore {
+    private let service = "com.lucid47.outboundsales.google-drive.oauth"
+    private let account = "primary"
+
+    var hasCredential: Bool {
+        (try? load()) != nil
+    }
+
+    func load() throws -> GoogleDriveCredential? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw GoogleDriveSyncError.credentialStoreFailed(status)
+        }
+        guard let credential = try? JSONDecoder().decode(GoogleDriveCredential.self, from: data) else {
+            try delete()
+            return nil
+        }
+        return credential
+    }
+
+    func save(_ credential: GoogleDriveCredential) throws {
+        let data = try JSONEncoder().encode(credential)
+        let updateStatus = SecItemUpdate(
+            baseQuery as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw GoogleDriveSyncError.credentialStoreFailed(updateStatus)
+        }
+
+        var attributes = baseQuery
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw GoogleDriveSyncError.credentialStoreFailed(addStatus)
+        }
+    }
+
+    func delete() throws {
+        let status = SecItemDelete(baseQuery as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw GoogleDriveSyncError.credentialStoreFailed(status)
+        }
+    }
+
+    private var baseQuery: [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }
 

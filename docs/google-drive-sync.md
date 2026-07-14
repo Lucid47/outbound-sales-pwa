@@ -56,7 +56,8 @@ Client ID: iOS application OAuth Client ID
 Client Secret: 사용하지 않음
 Redirect Scheme: GoogleDriveRedirectScheme
 Redirect URI: {GoogleDriveRedirectScheme}:/oauth2redirect
-Token 저장: access token 장기 저장 안 함
+Token 저장: refresh token은 iOS Keychain에 저장
+Access token: 메모리에서 만료 전까지 재사용하고 refresh token으로 자동 갱신
 계정 표시 정보 저장: 이메일/이름/사진 URL 정도만 UserDefaults에 저장
 ```
 
@@ -166,6 +167,8 @@ GOOGLE_DRIVE_REDIRECT_SCHEME=com.lucid47.outboundsales
 native/scripts/build-ios-with-google-drive.sh
 ```
 
+Xcode의 실행 버튼이나 일반 `xcodebuild`를 사용해도 `native/GoogleDriveOAuth.xcconfig`가 Git 제외된 로컬 설정을 선택적으로 읽습니다. 따라서 같은 Mac에서는 전용 스크립트와 Xcode 직접 빌드 모두 동일한 OAuth Client ID를 포함합니다.
+
 4. 연결된 아이폰에 바로 설치하려면 기기 ID를 넣습니다.
 
 ```bash
@@ -173,6 +176,8 @@ native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
 ```
 
 `native/.google-drive-oauth.local`은 Git 제외 대상입니다. 실제 Client ID를 `Info.plist`에 직접 넣어 커밋하지 않습니다.
+
+빌드 결과의 `GoogleDriveOAuthClientID`가 비어 있으면 앱은 컴파일되지만 설정 화면에 Client ID 필요 상태가 표시되고 Google 로그인을 시작할 수 없습니다.
 
 주의:
 
@@ -193,7 +198,8 @@ native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
 
 주의점:
 - OAuth redirect URI와 URL scheme 설정을 정확히 맞춰야 함
-- refresh token 장기 저장 정책을 별도로 설계해야 함
+- refresh token은 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 정책으로 Keychain에 보관
+- access token은 Keychain에 장기 저장하지 않고 앱 실행 중 캐시만 사용
 - Google 정책 변화가 있으면 직접 대응해야 함
 ```
 
@@ -266,8 +272,21 @@ native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
 고객 수정, 전화, 문자, 메모, 완료 처리 등 로컬 변경
 → 설정 화면에 동기화 필요 표시
 → Drive와 동기화
+→ 저장된 refresh token으로 access token 자동 발급
+→ 로그인 화면 없이 동기화 실행
 → 마지막 동기화 시간 갱신
 ```
+
+최초 연결 또는 인증 만료:
+
+```text
+최초 연결: Google 로그인 및 권한 동의 1회
+정상 사용: Keychain의 refresh token으로 조용히 인증 갱신
+Google에서 권한 철회 또는 invalid_grant 반환: 연결 상태 해제 후 재연결 안내
+앱의 연결 해제: Keychain refresh token과 로컬 계정 표시 정보 삭제
+```
+
+2026-07-13 이전 빌드는 이메일 등 계정 표시 정보만 저장하고 refresh token을 버렸습니다. 해당 빌드에서 업데이트한 사용자는 기존 토큰을 복구할 수 없으므로 업데이트 후 Google 계정을 한 번 다시 연결해야 합니다. 이후 정상적인 동기화에서는 로그인 화면이 반복해서 나타나지 않습니다.
 
 ## 병합 정책
 
@@ -284,8 +303,9 @@ native/scripts/build-ios-with-google-drive.sh --device-id 기기_ID --install
 - 삭제 동기화는 아직 완전하지 않습니다.
 - 삭제 동기화를 안정화하려면 `deletedAt` 필드와 tombstone 정책이 필요합니다.
 - 앱이 완전히 닫힌 상태에서 백그라운드 자동 동기화는 보장하지 않습니다.
-- 네이티브 앱은 Google access token을 저장하지 않고 버튼을 누를 때마다 새로 요청합니다.
-- 네이티브 앱의 실사용 테스트는 iOS OAuth Client ID 설정 후 가능합니다.
+- access token은 보안을 위해 디스크에 장기 저장하지 않으며, 앱 재실행 후 첫 Drive 작업에서 Keychain의 refresh token으로 자동 재발급합니다.
+- Google 계정 권한이 철회되거나 OAuth 프로젝트가 Testing 상태에서 토큰이 만료되면 사용자가 한 번 다시 연결해야 합니다.
+- 자동 동기화와 백그라운드 실행은 아직 별도 구현 항목입니다.
 - 실제 Google 로그인/권한 동의 화면은 Google 정책 변경에 따라 문구가 바뀔 수 있습니다.
 
 ## 운영 참고

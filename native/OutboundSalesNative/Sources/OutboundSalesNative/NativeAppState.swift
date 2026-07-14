@@ -1,3 +1,4 @@
+import AuthenticationServices
 import CoreLocation
 import Foundation
 import OutboundSalesCore
@@ -52,8 +53,10 @@ public final class NativeAppState: ObservableObject {
     private var cachedRemoteBackup: NativeFullBackup?
 
     public init(seedSamples: Bool = false, fileStore: NativeAppFileStore = NativeAppFileStore()) {
+        let savedDriveAccount = Self.loadDriveAccount()
+        let needsDriveReconnect = savedDriveAccount != nil && !GoogleDriveSyncService.hasStoredAuthorization
         self.fileStore = fileStore
-        self.driveAccount = Self.loadDriveAccount()
+        self.driveAccount = needsDriveReconnect ? nil : savedDriveAccount
         self.lastDriveSyncAt = Self.loadLastDriveSyncAt()
 
         do {
@@ -81,6 +84,9 @@ public final class NativeAppState: ObservableObject {
                     self.customers,
                     statuses: resolvedDashboardStatuses
                 )
+                if needsDriveReconnect {
+                    self.driveSyncMessage = "보안 인증 방식이 갱신되었습니다. Google 계정을 한 번 다시 연결하세요."
+                }
                 return
             }
         } catch {
@@ -116,6 +122,9 @@ public final class NativeAppState: ObservableObject {
             self.dashboardStatuses = Self.defaultDashboardStatuses()
             self.dashboardSettings = DashboardHeatmapSettings()
             self.selectedListId = nil
+        }
+        if needsDriveReconnect {
+            self.driveSyncMessage = "보안 인증 방식이 갱신되었습니다. Google 계정을 한 번 다시 연결하세요."
         }
     }
 
@@ -1028,6 +1037,7 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func disconnectGoogleDrive() {
+        driveService.clearAuthorization()
         driveAccount = nil
         lastDriveSyncAt = nil
         cachedRemoteBackup = nil
@@ -1039,16 +1049,16 @@ public final class NativeAppState: ObservableObject {
     public func syncGoogleDriveAll() async {
         guard canUseDrive() else { return }
         await runDriveOperation { [self] in
-            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+            let accessToken = try await driveService.accessToken(for: GoogleDriveSyncService.appDataScopes)
             let localBackup = try buildBackup()
-            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) {
-                let remoteBackup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: accessToken) {
+                let remoteBackup = try await driveService.downloadBackup(accessToken: accessToken, fileId: remoteFile.id)
                 let merged = mergeBackups(remoteBackup, localBackup)
                 restore(backup: merged, selectedListIds: nil)
                 persist()
-                try await driveService.updateAppDataSyncFile(accessToken: token.accessToken, fileId: remoteFile.id, backup: merged)
+                try await driveService.updateAppDataSyncFile(accessToken: accessToken, fileId: remoteFile.id, backup: merged)
             } else {
-                try await driveService.createAppDataSyncFile(accessToken: token.accessToken, backup: localBackup)
+                try await driveService.createAppDataSyncFile(accessToken: accessToken, backup: localBackup)
             }
             markDriveSyncComplete(message: "Google Drive 동기화를 완료했습니다.")
         }
@@ -1057,12 +1067,12 @@ public final class NativeAppState: ObservableObject {
     public func saveAllToGoogleDrive() async {
         guard canUseDrive() else { return }
         await runDriveOperation { [self] in
-            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
+            let accessToken = try await driveService.accessToken(for: GoogleDriveSyncService.appDataScopes)
             let backup = try buildBackup()
-            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) {
-                try await driveService.updateAppDataSyncFile(accessToken: token.accessToken, fileId: remoteFile.id, backup: backup)
+            if let remoteFile = try await driveService.findAppDataSyncFile(accessToken: accessToken) {
+                try await driveService.updateAppDataSyncFile(accessToken: accessToken, fileId: remoteFile.id, backup: backup)
             } else {
-                try await driveService.createAppDataSyncFile(accessToken: token.accessToken, backup: backup)
+                try await driveService.createAppDataSyncFile(accessToken: accessToken, backup: backup)
             }
             markDriveSyncComplete(message: "현재 기기 전체 데이터를 Drive에 저장했습니다.")
         }
@@ -1071,14 +1081,14 @@ public final class NativeAppState: ObservableObject {
     public func loadRemoteDriveBackup() async {
         guard canUseDrive() else { return }
         await runDriveOperation { [self] in
-            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
-            guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) else {
+            let accessToken = try await driveService.accessToken(for: GoogleDriveSyncService.appDataScopes)
+            guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: accessToken) else {
                 cachedRemoteBackup = nil
                 remoteDriveLists = []
                 driveSyncMessage = "Google Drive에 동기화 파일이 없습니다."
                 return
             }
-            let backup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+            let backup = try await driveService.downloadBackup(accessToken: accessToken, fileId: remoteFile.id)
             cachedRemoteBackup = backup
             remoteDriveLists = backup.snapshot.customerLists
             driveSyncMessage = "\(remoteDriveLists.count)개 고객리스트를 Drive에서 확인했습니다."
@@ -1092,12 +1102,12 @@ public final class NativeAppState: ObservableObject {
             if let cachedRemoteBackup {
                 backup = cachedRemoteBackup
             } else {
-                let token = try await driveService.authorize(scopes: GoogleDriveSyncService.appDataScopes)
-                guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: token.accessToken) else {
+                let accessToken = try await driveService.accessToken(for: GoogleDriveSyncService.appDataScopes)
+                guard let remoteFile = try await driveService.findAppDataSyncFile(accessToken: accessToken) else {
                     driveSyncMessage = "Google Drive에 동기화 파일이 없습니다."
                     return
                 }
-                backup = try await driveService.downloadBackup(accessToken: token.accessToken, fileId: remoteFile.id)
+                backup = try await driveService.downloadBackup(accessToken: accessToken, fileId: remoteFile.id)
             }
             restore(backup: backup, selectedListIds: listIds)
             persist()
@@ -1108,9 +1118,9 @@ public final class NativeAppState: ObservableObject {
     public func createVisibleGoogleDriveBackup(listIds: Set<String>? = nil) async {
         guard canUseDrive() else { return }
         await runDriveOperation { [self] in
-            let token = try await driveService.authorize(scopes: GoogleDriveSyncService.fileScopes)
+            let accessToken = try await driveService.accessToken(for: GoogleDriveSyncService.fileScopes)
             let backup = try buildBackup(listIds: listIds)
-            try await driveService.createVisibleBackup(accessToken: token.accessToken, fileName: driveBackupFileName(listIds: listIds), backup: backup)
+            try await driveService.createVisibleBackup(accessToken: accessToken, fileName: driveBackupFileName(listIds: listIds), backup: backup)
             driveSyncMessage = listIds == nil ? "Google Drive에 전체 백업 파일을 만들었습니다." : "Google Drive에 선택 고객리스트 백업 파일을 만들었습니다."
         }
     }
@@ -1235,6 +1245,11 @@ public final class NativeAppState: ObservableObject {
             driveSyncMessage = "먼저 Google 계정으로 연결하세요."
             return false
         }
+        guard driveService.hasStoredAuthorization else {
+            driveAccount = nil
+            driveSyncMessage = "Google 계정 보안 인증을 갱신해야 합니다. 계정을 한 번 다시 연결하세요."
+            return false
+        }
         return true
     }
 
@@ -1244,8 +1259,16 @@ public final class NativeAppState: ObservableObject {
         defer { driveSyncBusy = false }
         do {
             try await operation()
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            driveSyncMessage = "Google 로그인을 취소했습니다."
+        } catch let error as GoogleDriveSyncError {
+            if case .authorizationRequired = error {
+                driveAccount = nil
+                Self.clearDriveAccount()
+            }
+            driveSyncMessage = error.localizedDescription
         } catch {
-            driveSyncMessage = "Google Drive 작업에 실패했습니다. OAuth 설정과 권한을 확인하세요."
+            driveSyncMessage = "Google Drive 작업에 실패했습니다: \(error.localizedDescription)"
         }
     }
 
