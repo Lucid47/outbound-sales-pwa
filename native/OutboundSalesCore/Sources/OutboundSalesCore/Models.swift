@@ -167,8 +167,18 @@ public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
     public var importedAt: Date
     public var createdAt: Date
     public var updatedAt: Date
+    public var archivedAt: Date?
 
-    public init(id: String, name: String, companyName: String, sourceFileName: String, importedAt: Date, createdAt: Date, updatedAt: Date) {
+    public init(
+        id: String,
+        name: String,
+        companyName: String,
+        sourceFileName: String,
+        importedAt: Date,
+        createdAt: Date,
+        updatedAt: Date,
+        archivedAt: Date? = nil
+    ) {
         self.id = id
         self.name = name
         self.companyName = companyName
@@ -176,6 +186,190 @@ public struct CustomerList: Identifiable, Codable, Equatable, Sendable {
         self.importedAt = importedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.archivedAt = archivedAt
+    }
+}
+
+public enum ManagementPeriodState: String, Codable, CaseIterable, Sendable {
+    case active
+    case closed
+    case archived
+}
+
+public struct ManagementPeriod: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var startDate: Date
+    public var endDate: Date
+    public var customerListIds: [String]
+    public var customerIds: [String]
+    public var colorHex: String
+    public var state: ManagementPeriodState
+    public var summaryNote: String
+    public var closedAt: Date?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String,
+        name: String,
+        startDate: Date,
+        endDate: Date,
+        customerListIds: [String],
+        customerIds: [String] = [],
+        colorHex: String = "2563EB",
+        state: ManagementPeriodState = .active,
+        summaryNote: String = "",
+        closedAt: Date? = nil,
+        createdAt: Date,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.name = name
+        self.startDate = startDate
+        self.endDate = endDate
+        self.customerListIds = customerListIds
+        self.customerIds = customerIds
+        self.colorHex = colorHex
+        self.state = state
+        self.summaryNote = summaryNote
+        self.closedAt = closedAt
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public func contains(_ date: Date, calendar: Calendar = .current) -> Bool {
+        let start = calendar.startOfDay(for: startDate)
+        let endStart = calendar.startOfDay(for: endDate)
+        guard let end = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: endStart) else {
+            return false
+        }
+        return start...end ~= date
+    }
+
+    public func includes(customer: Customer) -> Bool {
+        if !customerIds.isEmpty {
+            return customerIds.contains(customer.id)
+        }
+        return customerListIds.contains(customer.customerListId)
+    }
+}
+
+public enum CustomerActivityKind: String, Codable, CaseIterable, Sendable {
+    case call
+    case message
+    case visit
+    case textMemo
+    case photoMemo
+    case voiceMemo
+    case customerCreated
+    case customerUpdated
+    case dashboardStageChanged
+    case scheduleAdded
+    case scheduleRemoved
+    case listCreated
+    case customersImported
+    case customersMoved
+    case listRenamed
+    case listArchived
+    case listRestored
+    case listDeleted
+    case managementPeriodCreated
+    case managementPeriodUpdated
+    case managementPeriodClosed
+    case managementPeriodArchived
+}
+
+public enum CustomerActivitySource: String, Codable, Sendable {
+    case app
+    case contactLog
+    case visitLog
+    case photoLog
+    case stageChangeLog
+}
+
+public struct CustomerActivityEvent: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var kind: CustomerActivityKind
+    public var occurredAt: Date
+    public var customerListId: String?
+    public var customerId: String?
+    public var title: String
+    public var detail: String
+    public var source: CustomerActivitySource
+    public var sourceRecordId: String?
+    public var actorId: String?
+    public var deviceId: String?
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        kind: CustomerActivityKind,
+        occurredAt: Date,
+        customerListId: String? = nil,
+        customerId: String? = nil,
+        title: String,
+        detail: String = "",
+        source: CustomerActivitySource = .app,
+        sourceRecordId: String? = nil,
+        actorId: String? = nil,
+        deviceId: String? = nil,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.kind = kind
+        self.occurredAt = occurredAt
+        self.customerListId = customerListId
+        self.customerId = customerId
+        self.title = title
+        self.detail = detail
+        self.source = source
+        self.sourceRecordId = sourceRecordId
+        self.actorId = actorId
+        self.deviceId = deviceId
+        self.createdAt = createdAt
+    }
+}
+
+public struct CustomerStageChangeLog: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var customerListId: String
+    public var customerId: String
+    public var previousStageId: String?
+    public var nextStageId: String
+    public var changedAt: Date
+
+    public init(
+        id: String,
+        customerListId: String,
+        customerId: String,
+        previousStageId: String?,
+        nextStageId: String,
+        changedAt: Date
+    ) {
+        self.id = id
+        self.customerListId = customerListId
+        self.customerId = customerId
+        self.previousStageId = previousStageId
+        self.nextStageId = nextStageId
+        self.changedAt = changedAt
+    }
+}
+
+public enum DeletedRecordKind: String, Codable, Sendable {
+    case customerList
+}
+
+public struct DeletedRecordTombstone: Identifiable, Codable, Equatable, Sendable {
+    public var id: String { "\(kind.rawValue):\(recordId)" }
+    public var kind: DeletedRecordKind
+    public var recordId: String
+    public var deletedAt: Date
+
+    public init(kind: DeletedRecordKind, recordId: String, deletedAt: Date) {
+        self.kind = kind
+        self.recordId = recordId
+        self.deletedAt = deletedAt
     }
 }
 

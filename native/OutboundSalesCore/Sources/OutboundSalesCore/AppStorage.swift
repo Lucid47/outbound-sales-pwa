@@ -14,6 +14,10 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
     public var contactExportBatches: [ContactExportBatch]
     public var dashboardStatuses: [DashboardStatusDefinition]
     public var dashboardSettings: DashboardHeatmapSettings
+    public var managementPeriods: [ManagementPeriod]
+    public var activityEvents: [CustomerActivityEvent]
+    public var stageChangeLogs: [CustomerStageChangeLog]
+    public var deletionTombstones: [DeletedRecordTombstone]
     public var selectedListId: String?
     public var savedAt: Date
 
@@ -31,6 +35,10 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         contactExportBatches: [ContactExportBatch] = [],
         dashboardStatuses: [DashboardStatusDefinition] = [],
         dashboardSettings: DashboardHeatmapSettings = DashboardHeatmapSettings(),
+        managementPeriods: [ManagementPeriod] = [],
+        activityEvents: [CustomerActivityEvent] = [],
+        stageChangeLogs: [CustomerStageChangeLog] = [],
+        deletionTombstones: [DeletedRecordTombstone] = [],
         selectedListId: String?,
         savedAt: Date = Date()
     ) {
@@ -47,6 +55,10 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.contactExportBatches = contactExportBatches
         self.dashboardStatuses = dashboardStatuses
         self.dashboardSettings = dashboardSettings
+        self.managementPeriods = managementPeriods
+        self.activityEvents = activityEvents
+        self.stageChangeLogs = stageChangeLogs
+        self.deletionTombstones = deletionTombstones
         self.selectedListId = selectedListId
         self.savedAt = savedAt
     }
@@ -67,6 +79,10 @@ public struct NativeAppSnapshot: Codable, Equatable, Sendable {
         self.dashboardStatuses = try container.decodeIfPresent([DashboardStatusDefinition].self, forKey: .dashboardStatuses) ?? []
         self.dashboardSettings = try container.decodeIfPresent(DashboardHeatmapSettings.self, forKey: .dashboardSettings)
             ?? DashboardHeatmapSettings(updatedAt: .distantPast)
+        self.managementPeriods = try container.decodeIfPresent([ManagementPeriod].self, forKey: .managementPeriods) ?? []
+        self.activityEvents = try container.decodeIfPresent([CustomerActivityEvent].self, forKey: .activityEvents) ?? []
+        self.stageChangeLogs = try container.decodeIfPresent([CustomerStageChangeLog].self, forKey: .stageChangeLogs) ?? []
+        self.deletionTombstones = try container.decodeIfPresent([DeletedRecordTombstone].self, forKey: .deletionTombstones) ?? []
         self.selectedListId = try container.decodeIfPresent(String.self, forKey: .selectedListId)
         self.savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt) ?? Date()
     }
@@ -142,6 +158,12 @@ public struct NativeAppFileStore: Sendable {
 
     public func readAssetData(fileName: String) throws -> Data {
         try Data(contentsOf: assetURL(fileName: fileName))
+    }
+
+    public func deleteAssetIfPresent(fileName: String) throws {
+        let url = assetURL(fileName: fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
     }
 
     public static func defaultFileURL() -> URL {

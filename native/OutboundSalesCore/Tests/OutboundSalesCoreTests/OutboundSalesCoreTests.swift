@@ -642,6 +642,41 @@ final class OutboundSalesCoreTests: XCTestCase {
                 statusCount: 7,
                 updatedAt: now
             ),
+            managementPeriods: [
+                ManagementPeriod(
+                    id: "period-1",
+                    name: "2026년 하반기",
+                    startDate: now,
+                    endDate: now.addingTimeInterval(86_400 * 30),
+                    customerListIds: [list.id],
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
+            activityEvents: [
+                CustomerActivityEvent(
+                    id: "activity-1",
+                    kind: .customerCreated,
+                    occurredAt: now,
+                    customerListId: list.id,
+                    customerId: customer.id,
+                    title: "고객 추가",
+                    createdAt: now
+                )
+            ],
+            stageChangeLogs: [
+                CustomerStageChangeLog(
+                    id: "stage-log-1",
+                    customerListId: list.id,
+                    customerId: customer.id,
+                    previousStageId: nil,
+                    nextStageId: "dashboard-status-1",
+                    changedAt: now
+                )
+            ],
+            deletionTombstones: [
+                DeletedRecordTombstone(kind: .customerList, recordId: "deleted-list", deletedAt: now)
+            ],
             selectedListId: list.id,
             savedAt: now
         )
@@ -655,7 +690,17 @@ final class OutboundSalesCoreTests: XCTestCase {
     func testDecodesSnapshotBeforeContactOwnershipTracking() throws {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let snapshot = NativeAppSnapshot(
-            customerLists: [],
+            customerLists: [
+                CustomerList(
+                    id: "list-1",
+                    name: "기존 리스트",
+                    companyName: "기존 리스트",
+                    sourceFileName: "legacy.csv",
+                    importedAt: now,
+                    createdAt: now,
+                    updatedAt: now
+                )
+            ],
             customers: [
                 Customer(
                     id: "customer-1",
@@ -694,6 +739,14 @@ final class OutboundSalesCoreTests: XCTestCase {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         object.removeValue(forKey: "contactExportBatches")
         object.removeValue(forKey: "dashboardSettings")
+        object.removeValue(forKey: "managementPeriods")
+        object.removeValue(forKey: "activityEvents")
+        object.removeValue(forKey: "stageChangeLogs")
+        object.removeValue(forKey: "deletionTombstones")
+        if var lists = object["customerLists"] as? [[String: Any]], !lists.isEmpty {
+            lists[0].removeValue(forKey: "archivedAt")
+            object["customerLists"] = lists
+        }
         if var customers = object["customers"] as? [[String: Any]], !customers.isEmpty {
             customers[0].removeValue(forKey: "contactRegistrationOwnership")
             object["customers"] = customers
@@ -709,6 +762,56 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(decoded.dashboardSettings.paletteFamily, .blue)
         XCTAssertTrue(decoded.dashboardSettings.showsLegend)
         XCTAssertEqual(decoded.dashboardSettings.statusCount, 5)
+        XCTAssertNil(decoded.customerLists.first?.archivedAt)
+        XCTAssertTrue(decoded.managementPeriods.isEmpty)
+        XCTAssertTrue(decoded.activityEvents.isEmpty)
+        XCTAssertTrue(decoded.stageChangeLogs.isEmpty)
+        XCTAssertTrue(decoded.deletionTombstones.isEmpty)
+    }
+
+    func testManagementPeriodUsesInclusiveDatesAndOptionalCustomerScope() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let start = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 7, day: 1)))
+        let end = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 30)))
+        let lastMoment = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: 23, minute: 59)))
+        let outside = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 1)))
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let period = ManagementPeriod(
+            id: "period-1",
+            name: "3분기 관리",
+            startDate: start,
+            endDate: end,
+            customerListIds: ["list-1"],
+            customerIds: ["customer-1"],
+            createdAt: now,
+            updatedAt: now
+        )
+        let includedCustomer = Customer(
+            id: "customer-1",
+            customerListId: "list-1",
+            name: "포함 고객",
+            phoneNumber: "",
+            address: "",
+            notes: "",
+            createdAt: now,
+            updatedAt: now
+        )
+        let excludedCustomer = Customer(
+            id: "customer-2",
+            customerListId: "list-1",
+            name: "제외 고객",
+            phoneNumber: "",
+            address: "",
+            notes: "",
+            createdAt: now,
+            updatedAt: now
+        )
+
+        XCTAssertTrue(period.contains(start, calendar: calendar))
+        XCTAssertTrue(period.contains(lastMoment, calendar: calendar))
+        XCTAssertFalse(period.contains(outside, calendar: calendar))
+        XCTAssertTrue(period.includes(customer: includedCustomer))
+        XCTAssertFalse(period.includes(customer: excludedCustomer))
     }
 
     private func ocrBox(

@@ -19,9 +19,31 @@ public struct CustomerHistoryEntry: Identifiable, Equatable {
     public var visitLog: VisitLog?
 }
 
+public struct CustomerListDeletionImpact: Equatable {
+    public var customerCount: Int
+    public var visitLogCount: Int
+    public var contactLogCount: Int
+    public var photoLogCount: Int
+    public var scheduleCount: Int
+    public var campaignCount: Int
+
+    public var storedFileCount: Int {
+        photoLogCount * 2
+    }
+}
+
+public struct CustomerActivitySummary: Equatable {
+    public var totalCount: Int
+    public var callCount: Int
+    public var messageCount: Int
+    public var visitCount: Int
+    public var memoCount: Int
+    public var customerCount: Int
+}
+
 @MainActor
 public final class NativeAppState: ObservableObject {
-    @Published public private(set) var customerLists: [CustomerList]
+    @Published private var storedCustomerLists: [CustomerList]
     @Published public private(set) var customers: [Customer]
     @Published public private(set) var visitLogs: [VisitLog]
     @Published public private(set) var contactLogs: [ContactLog]
@@ -33,6 +55,10 @@ public final class NativeAppState: ObservableObject {
     @Published public private(set) var contactExportBatches: [ContactExportBatch]
     @Published public private(set) var dashboardStatuses: [DashboardStatusDefinition]
     @Published public private(set) var dashboardSettings: DashboardHeatmapSettings
+    @Published public private(set) var managementPeriods: [ManagementPeriod]
+    @Published public private(set) var activityEvents: [CustomerActivityEvent]
+    @Published public private(set) var stageChangeLogs: [CustomerStageChangeLog]
+    @Published public private(set) var deletionTombstones: [DeletedRecordTombstone]
     @Published public private(set) var selectedListId: String?
     @Published public var searchText = ""
     @Published public var importMessage = ""
@@ -61,7 +87,7 @@ public final class NativeAppState: ObservableObject {
 
         do {
             if let snapshot = try fileStore.load() {
-                self.customerLists = snapshot.customerLists
+                self.storedCustomerLists = snapshot.customerLists
                 self.customers = snapshot.customers
                 self.visitLogs = snapshot.visitLogs
                 self.contactLogs = snapshot.contactLogs
@@ -78,7 +104,14 @@ public final class NativeAppState: ObservableObject {
                 var resolvedDashboardSettings = snapshot.dashboardSettings
                 resolvedDashboardSettings.statusCount = resolvedDashboardStatuses.count
                 self.dashboardSettings = resolvedDashboardSettings
-                self.selectedListId = snapshot.selectedListId ?? snapshot.customerLists.first?.id
+                self.managementPeriods = snapshot.managementPeriods
+                self.activityEvents = snapshot.activityEvents
+                self.stageChangeLogs = snapshot.stageChangeLogs
+                self.deletionTombstones = snapshot.deletionTombstones
+                let activeLists = snapshot.customerLists.filter { $0.archivedAt == nil }
+                self.selectedListId = snapshot.selectedListId.flatMap { selectedId in
+                    activeLists.contains { $0.id == selectedId } ? selectedId : nil
+                } ?? activeLists.first?.id
                 self.storageMessage = "저장된 데이터를 불러왔습니다."
                 self.customers = Self.repairingDashboardAssignments(
                     self.customers,
@@ -95,7 +128,7 @@ public final class NativeAppState: ObservableObject {
 
         if seedSamples {
             let seed = Self.sampleData()
-            self.customerLists = seed.lists
+            self.storedCustomerLists = seed.lists
             self.customers = seed.customers
             self.visitLogs = seed.visitLogs
             self.contactLogs = []
@@ -107,9 +140,13 @@ public final class NativeAppState: ObservableObject {
             self.contactExportBatches = []
             self.dashboardStatuses = Self.defaultDashboardStatuses()
             self.dashboardSettings = DashboardHeatmapSettings()
+            self.managementPeriods = []
+            self.activityEvents = []
+            self.stageChangeLogs = []
+            self.deletionTombstones = []
             self.selectedListId = seed.lists.first?.id
         } else {
-            self.customerLists = []
+            self.storedCustomerLists = []
             self.customers = []
             self.visitLogs = []
             self.contactLogs = []
@@ -121,6 +158,10 @@ public final class NativeAppState: ObservableObject {
             self.contactExportBatches = []
             self.dashboardStatuses = Self.defaultDashboardStatuses()
             self.dashboardSettings = DashboardHeatmapSettings()
+            self.managementPeriods = []
+            self.activityEvents = []
+            self.stageChangeLogs = []
+            self.deletionTombstones = []
             self.selectedListId = nil
         }
         if needsDriveReconnect {
@@ -128,12 +169,23 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    public var customerLists: [CustomerList] {
+        storedCustomerLists.filter { $0.archivedAt == nil }
+    }
+
+    public var archivedCustomerLists: [CustomerList] {
+        storedCustomerLists.filter { $0.archivedAt != nil }
+    }
+
     public var selectedList: CustomerList? {
         customerLists.first { $0.id == selectedListId }
     }
 
     public var visibleCustomers: [Customer] {
-        let scoped = selectedListId.map { id in customers.filter { $0.customerListId == id } } ?? customers
+        let activeListIds = Set(customerLists.map(\.id))
+        let scoped = selectedListId.map { id in
+            customers.filter { $0.customerListId == id }
+        } ?? customers.filter { activeListIds.contains($0.customerListId) }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return scoped }
         return scoped.filter { customer in
@@ -183,8 +235,364 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func selectList(_ list: CustomerList) {
+        guard list.archivedAt == nil else { return }
         selectedListId = list.id
         persist()
+    }
+
+    public func customerCount(in listId: String) -> Int {
+        customers.count { $0.customerListId == listId }
+    }
+
+    public func deletionImpact(for listId: String) -> CustomerListDeletionImpact {
+        let customerIds = Set(customers.filter { $0.customerListId == listId }.map(\.id))
+        return CustomerListDeletionImpact(
+            customerCount: customerIds.count,
+            visitLogCount: visitLogs.count { $0.customerListId == listId || customerIds.contains($0.customerId) },
+            contactLogCount: contactLogs.count { $0.customerListId == listId || customerIds.contains($0.customerId) },
+            photoLogCount: photoLogs.count { $0.customerListId == listId || customerIds.contains($0.customerId) },
+            scheduleCount: visitSchedules.count { $0.customerListId == listId },
+            campaignCount: groupSmsCampaigns.count { campaign in
+                campaign.customerListId == listId || campaign.recipients.contains { recipient in
+                    recipient.customerId.map(customerIds.contains) ?? false
+                }
+            }
+        )
+    }
+
+    public func renameCustomerList(id: String, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = storedCustomerLists.firstIndex(where: { $0.id == id }) else { return }
+        let previousName = storedCustomerLists[index].name
+        guard previousName != trimmed else { return }
+        let now = Date()
+        storedCustomerLists[index].name = trimmed
+        storedCustomerLists[index].companyName = trimmed
+        storedCustomerLists[index].updatedAt = now
+        recordActivity(
+            kind: .listRenamed,
+            occurredAt: now,
+            customerListId: id,
+            title: "고객리스트 이름 변경",
+            detail: "\(previousName) -> \(trimmed)"
+        )
+        persist()
+    }
+
+    public func archiveCustomerList(id: String) {
+        guard let index = storedCustomerLists.firstIndex(where: { $0.id == id && $0.archivedAt == nil }) else { return }
+        let now = Date()
+        let listName = storedCustomerLists[index].name
+        storedCustomerLists[index].archivedAt = now
+        storedCustomerLists[index].updatedAt = now
+        recordActivity(
+            kind: .listArchived,
+            occurredAt: now,
+            customerListId: id,
+            title: "고객리스트 보관",
+            detail: listName
+        )
+        resolveSelectedList(excluding: id)
+        actionMessage = "\(listName)을 보관했습니다. 언제든 복원할 수 있습니다."
+        persist()
+    }
+
+    public func restoreCustomerList(id: String) {
+        guard let index = storedCustomerLists.firstIndex(where: { $0.id == id && $0.archivedAt != nil }) else { return }
+        let now = Date()
+        let listName = storedCustomerLists[index].name
+        storedCustomerLists[index].archivedAt = nil
+        storedCustomerLists[index].updatedAt = now
+        recordActivity(
+            kind: .listRestored,
+            occurredAt: now,
+            customerListId: id,
+            title: "고객리스트 복원",
+            detail: listName
+        )
+        selectedListId = id
+        actionMessage = "\(listName)을 복원했습니다."
+        persist()
+    }
+
+    public func moveAllCustomers(from sourceListId: String, to targetListId: String) {
+        guard sourceListId != targetListId,
+              let sourceIndex = storedCustomerLists.firstIndex(where: { $0.id == sourceListId }),
+              let targetIndex = storedCustomerLists.firstIndex(where: { $0.id == targetListId && $0.archivedAt == nil }) else { return }
+        let movedCustomerIds = Set(customers.filter { $0.customerListId == sourceListId }.map(\.id))
+        guard !movedCustomerIds.isEmpty else { return }
+        let now = Date()
+        let sourceName = storedCustomerLists[sourceIndex].name
+        let targetName = storedCustomerLists[targetIndex].name
+
+        for index in customers.indices where movedCustomerIds.contains(customers[index].id) {
+            customers[index].customerListId = targetListId
+            customers[index].updatedAt = now
+        }
+        for index in visitLogs.indices where visitLogs[index].customerListId == sourceListId || movedCustomerIds.contains(visitLogs[index].customerId) {
+            visitLogs[index].customerListId = targetListId
+        }
+        for index in contactLogs.indices where contactLogs[index].customerListId == sourceListId || movedCustomerIds.contains(contactLogs[index].customerId) {
+            contactLogs[index].customerListId = targetListId
+        }
+        for index in photoLogs.indices where photoLogs[index].customerListId == sourceListId || movedCustomerIds.contains(photoLogs[index].customerId) {
+            photoLogs[index].customerListId = targetListId
+        }
+        for index in visitSchedules.indices where visitSchedules[index].customerListId == sourceListId {
+            visitSchedules[index].customerListId = targetListId
+            visitSchedules[index].updatedAt = now
+        }
+        for index in visitScheduleItems.indices where visitScheduleItems[index].customerListId == sourceListId || movedCustomerIds.contains(visitScheduleItems[index].customerId) {
+            visitScheduleItems[index].customerListId = targetListId
+        }
+        for index in groupSmsCampaigns.indices where groupSmsCampaigns[index].customerListId == sourceListId {
+            groupSmsCampaigns[index].customerListId = targetListId
+            groupSmsCampaigns[index].updatedAt = now
+        }
+        for index in contactExportBatches.indices where contactExportBatches[index].customerListId == sourceListId {
+            contactExportBatches[index].customerListId = targetListId
+            contactExportBatches[index].updatedAt = now
+        }
+        for index in stageChangeLogs.indices where stageChangeLogs[index].customerListId == sourceListId || movedCustomerIds.contains(stageChangeLogs[index].customerId) {
+            stageChangeLogs[index].customerListId = targetListId
+        }
+        for index in activityEvents.indices where activityEvents[index].customerListId == sourceListId && activityEvents[index].customerId.map(movedCustomerIds.contains) ?? false {
+            activityEvents[index].customerListId = targetListId
+        }
+        for index in managementPeriods.indices {
+            if managementPeriods[index].customerListIds.contains(sourceListId) {
+                managementPeriods[index].customerListIds.removeAll { $0 == sourceListId }
+                if !managementPeriods[index].customerListIds.contains(targetListId) {
+                    managementPeriods[index].customerListIds.append(targetListId)
+                }
+                managementPeriods[index].updatedAt = now
+            }
+        }
+
+        storedCustomerLists[sourceIndex].updatedAt = now
+        storedCustomerLists[targetIndex].updatedAt = now
+        recordActivity(
+            kind: .customersMoved,
+            occurredAt: now,
+            customerListId: targetListId,
+            title: "고객 일괄 이동",
+            detail: "\(sourceName) -> \(targetName), \(movedCustomerIds.count)명"
+        )
+        selectedListId = targetListId
+        actionMessage = "\(movedCustomerIds.count)명을 \(targetName)(으)로 이동했습니다."
+        persist()
+    }
+
+    public func permanentlyDeleteCustomerList(id: String) {
+        guard let list = storedCustomerLists.first(where: { $0.id == id }) else { return }
+        let now = Date()
+        let customerIds = Set(customers.filter { $0.customerListId == id }.map(\.id))
+        let scheduleIds = Set(visitSchedules.filter { $0.customerListId == id }.map(\.id))
+        let removedPhotoLogs = photoLogs.filter { $0.customerListId == id || customerIds.contains($0.customerId) }
+        let removedVisitLogs = visitLogs.filter { $0.customerListId == id || customerIds.contains($0.customerId) }
+
+        for log in removedPhotoLogs {
+            try? fileStore.deleteAssetIfPresent(fileName: log.fileName)
+            try? fileStore.deleteAssetIfPresent(fileName: log.thumbnailFileName)
+        }
+        for log in removedVisitLogs {
+            if let fileName = log.mapSnapshotFileName { try? fileStore.deleteAssetIfPresent(fileName: fileName) }
+            if let fileName = log.audioFileName { try? fileStore.deleteAssetIfPresent(fileName: fileName) }
+        }
+
+        storedCustomerLists.removeAll { $0.id == id }
+        customers.removeAll { $0.customerListId == id }
+        visitLogs.removeAll { $0.customerListId == id || customerIds.contains($0.customerId) }
+        contactLogs.removeAll { $0.customerListId == id || customerIds.contains($0.customerId) }
+        photoLogs.removeAll { $0.customerListId == id || customerIds.contains($0.customerId) }
+        visitSchedules.removeAll { $0.customerListId == id }
+        visitScheduleItems.removeAll { $0.customerListId == id || scheduleIds.contains($0.scheduleId) || customerIds.contains($0.customerId) }
+        groupSmsCampaigns.removeAll { campaign in
+            campaign.customerListId == id || campaign.recipients.contains { $0.customerId.map(customerIds.contains) ?? false }
+        }
+        contactExportBatches.removeAll { $0.customerListId == id }
+        stageChangeLogs.removeAll { $0.customerListId == id || customerIds.contains($0.customerId) }
+        activityEvents.removeAll { event in
+            event.customerListId == id || event.customerId.map(customerIds.contains) ?? false
+        }
+        for index in managementPeriods.indices {
+            managementPeriods[index].customerListIds.removeAll { $0 == id }
+            managementPeriods[index].customerIds.removeAll { customerIds.contains($0) }
+            managementPeriods[index].updatedAt = now
+        }
+        deletionTombstones.removeAll { $0.kind == .customerList && $0.recordId == id }
+        deletionTombstones.append(DeletedRecordTombstone(kind: .customerList, recordId: id, deletedAt: now))
+        recordActivity(
+            kind: .listDeleted,
+            occurredAt: now,
+            title: "고객리스트 영구삭제",
+            detail: "\(list.name), 고객 \(customerIds.count)명"
+        )
+        resolveSelectedList(excluding: id)
+        actionMessage = "\(list.name)을 영구삭제했습니다. 기기 연락처는 삭제하지 않았습니다."
+        persist()
+    }
+
+    @discardableResult
+    public func createManagementPeriod(
+        name: String,
+        startDate: Date,
+        endDate: Date,
+        customerListIds: [String],
+        customerIds: [String] = [],
+        colorHex: String = "2563EB"
+    ) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validListIds = Array(Set(customerListIds.filter { listId in
+            storedCustomerLists.contains { $0.id == listId }
+        })).sorted()
+        guard !trimmed.isEmpty, !validListIds.isEmpty else { return nil }
+        let calendar = Calendar.current
+        let resolvedStart = calendar.startOfDay(for: min(startDate, endDate))
+        let resolvedEnd = calendar.startOfDay(for: max(startDate, endDate))
+        let validCustomerIds = Array(Set(customerIds.filter { customerId in
+            customers.contains { customer in
+                customer.id == customerId && validListIds.contains(customer.customerListId)
+            }
+        })).sorted()
+        let now = Date()
+        let period = ManagementPeriod(
+            id: UUID().uuidString,
+            name: trimmed,
+            startDate: resolvedStart,
+            endDate: resolvedEnd,
+            customerListIds: validListIds,
+            customerIds: validCustomerIds,
+            colorHex: colorHex,
+            createdAt: now,
+            updatedAt: now
+        )
+        managementPeriods.insert(period, at: 0)
+        recordActivity(
+            kind: .managementPeriodCreated,
+            occurredAt: now,
+            title: "관리 기간 생성",
+            detail: trimmed
+        )
+        actionMessage = "\(trimmed) 관리 기간을 만들었습니다."
+        persist()
+        return period.id
+    }
+
+    public func updateManagementPeriod(
+        id: String,
+        name: String,
+        startDate: Date,
+        endDate: Date,
+        customerListIds: [String],
+        customerIds: [String],
+        colorHex: String,
+        summaryNote: String
+    ) {
+        guard let index = managementPeriods.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let calendar = Calendar.current
+        let resolvedStart = calendar.startOfDay(for: min(startDate, endDate))
+        let resolvedEnd = calendar.startOfDay(for: max(startDate, endDate))
+        let validListIds = Array(Set(customerListIds.filter { listId in
+            storedCustomerLists.contains { $0.id == listId }
+        })).sorted()
+        guard !validListIds.isEmpty else { return }
+        let validCustomerIds = Array(Set(customerIds.filter { customerId in
+            customers.contains { customer in
+                customer.id == customerId && validListIds.contains(customer.customerListId)
+            }
+        })).sorted()
+        let now = Date()
+        managementPeriods[index].name = trimmed
+        managementPeriods[index].startDate = resolvedStart
+        managementPeriods[index].endDate = resolvedEnd
+        managementPeriods[index].customerListIds = validListIds
+        managementPeriods[index].customerIds = validCustomerIds
+        managementPeriods[index].colorHex = colorHex
+        managementPeriods[index].summaryNote = summaryNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        managementPeriods[index].updatedAt = now
+        recordActivity(
+            kind: .managementPeriodUpdated,
+            occurredAt: now,
+            title: "관리 기간 수정",
+            detail: trimmed
+        )
+        persist()
+    }
+
+    public func closeManagementPeriod(id: String, summaryNote: String) {
+        guard let index = managementPeriods.firstIndex(where: { $0.id == id && $0.state == .active }) else { return }
+        let now = Date()
+        managementPeriods[index].state = .closed
+        managementPeriods[index].summaryNote = summaryNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        managementPeriods[index].closedAt = now
+        managementPeriods[index].updatedAt = now
+        recordActivity(
+            kind: .managementPeriodClosed,
+            occurredAt: now,
+            title: "관리 기간 마감",
+            detail: managementPeriods[index].name
+        )
+        actionMessage = "\(managementPeriods[index].name)을 마감했습니다."
+        persist()
+    }
+
+    public func archiveManagementPeriod(id: String) {
+        guard let index = managementPeriods.firstIndex(where: { $0.id == id }) else { return }
+        let now = Date()
+        managementPeriods[index].state = .archived
+        managementPeriods[index].updatedAt = now
+        recordActivity(
+            kind: .managementPeriodArchived,
+            occurredAt: now,
+            title: "관리 기간 보관",
+            detail: managementPeriods[index].name
+        )
+        persist()
+    }
+
+    public func activityReport(
+        from startDate: Date? = nil,
+        to endDate: Date? = nil,
+        listIds: Set<String>? = nil,
+        managementPeriodId: String? = nil
+    ) -> [CustomerActivityEvent] {
+        let period = managementPeriodId.flatMap { id in managementPeriods.first { $0.id == id } }
+        let calendar = Calendar.current
+        let effectiveStart = period?.startDate ?? startDate
+        let effectiveEnd = period?.endDate ?? endDate
+        let endBoundary = effectiveEnd.flatMap { date in
+            calendar.date(byAdding: DateComponents(day: 1, second: -1), to: calendar.startOfDay(for: date))
+        }
+        let effectiveListIds = period.map { Set($0.customerListIds) } ?? listIds
+        let effectiveCustomerIds = period.flatMap { $0.customerIds.isEmpty ? nil : Set($0.customerIds) }
+
+        return combinedActivityEvents()
+            .filter { event in
+                if let effectiveStart, event.occurredAt < calendar.startOfDay(for: effectiveStart) { return false }
+                if let endBoundary, event.occurredAt > endBoundary { return false }
+                if let effectiveListIds,
+                   !(event.customerListId.map(effectiveListIds.contains) ?? false) { return false }
+                if let effectiveCustomerIds,
+                   !(event.customerId.map(effectiveCustomerIds.contains) ?? false) { return false }
+                return true
+            }
+            .sorted { $0.occurredAt > $1.occurredAt }
+    }
+
+    public func activitySummary(for events: [CustomerActivityEvent]) -> CustomerActivitySummary {
+        let customerIds = Set(events.compactMap(\.customerId))
+        return CustomerActivitySummary(
+            totalCount: events.count,
+            callCount: events.count { $0.kind == .call },
+            messageCount: events.count { $0.kind == .message },
+            visitCount: events.count { $0.kind == .visit },
+            memoCount: events.count { [.textMemo, .photoMemo, .voiceMemo].contains($0.kind) },
+            customerCount: customerIds.count
+        )
     }
 
     public func createEmptyList(listName: String) {
@@ -199,7 +607,7 @@ public final class NativeAppState: ObservableObject {
             createdAt: now,
             updatedAt: now
         )
-        customerLists.insert(list, at: 0)
+        storedCustomerLists.insert(list, at: 0)
         selectedListId = list.id
         persist()
     }
@@ -226,7 +634,7 @@ public final class NativeAppState: ObservableObject {
             updatedAt: now
         )
         let importedCustomers = customersFromCSV(parsed, customerListId: list.id, now: now)
-        customerLists.insert(list, at: 0)
+        storedCustomerLists.insert(list, at: 0)
         customers.append(contentsOf: importedCustomers)
         selectedListId = list.id
         importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
@@ -237,7 +645,7 @@ public final class NativeAppState: ObservableObject {
     }
 
     public func appendParsedCSV(_ parsed: ParsedCSV, to listId: String, sourceFileName: String = "import.csv") {
-        guard let listIndex = customerLists.firstIndex(where: { $0.id == listId }) else {
+        guard let listIndex = storedCustomerLists.firstIndex(where: { $0.id == listId && $0.archivedAt == nil }) else {
             importMessage = "추가할 고객리스트를 찾지 못했습니다."
             return
         }
@@ -245,9 +653,9 @@ public final class NativeAppState: ObservableObject {
         let now = Date()
         let importedCustomers = customersFromCSV(parsed, customerListId: listId, now: now)
         customers.append(contentsOf: importedCustomers)
-        customerLists[listIndex].updatedAt = now
+        storedCustomerLists[listIndex].updatedAt = now
         selectedListId = listId
-        importMessage = "\(customerLists[listIndex].name)에 \(importedCustomers.count)명의 고객을 추가했습니다."
+        importMessage = "\(storedCustomerLists[listIndex].name)에 \(importedCustomers.count)명의 고객을 추가했습니다."
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -267,7 +675,7 @@ public final class NativeAppState: ObservableObject {
             updatedAt: now
         )
         let importedCustomers = makeCustomers(from: contacts, customerListId: list.id, now: now, skipDuplicatePhones: skipDuplicatePhones)
-        customerLists.insert(list, at: 0)
+        storedCustomerLists.insert(list, at: 0)
         customers.append(contentsOf: importedCustomers.customers)
         selectedListId = list.id
         importMessage = "\(importedCustomers.customers.count)명의 연락처를 가져왔습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
@@ -278,7 +686,7 @@ public final class NativeAppState: ObservableObject {
     }
 
     func appendContactCustomers(_ contacts: [ContactImportCustomer], to listId: String, sourceFileName: String = "contacts", skipDuplicatePhones: Bool = true) {
-        guard let listIndex = customerLists.firstIndex(where: { $0.id == listId }) else {
+        guard let listIndex = storedCustomerLists.firstIndex(where: { $0.id == listId && $0.archivedAt == nil }) else {
             importMessage = "추가할 고객리스트를 찾지 못했습니다."
             return
         }
@@ -286,9 +694,9 @@ public final class NativeAppState: ObservableObject {
         let now = Date()
         let importedCustomers = makeCustomers(from: contacts, customerListId: listId, now: now, skipDuplicatePhones: skipDuplicatePhones)
         customers.append(contentsOf: importedCustomers.customers)
-        customerLists[listIndex].updatedAt = now
+        storedCustomerLists[listIndex].updatedAt = now
         selectedListId = listId
-        importMessage = "\(customerLists[listIndex].name)에 \(importedCustomers.customers.count)명의 연락처를 추가했습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
+        importMessage = "\(storedCustomerLists[listIndex].name)에 \(importedCustomers.customers.count)명의 연락처를 추가했습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -1090,7 +1498,7 @@ public final class NativeAppState: ObservableObject {
             }
             let backup = try await driveService.downloadBackup(accessToken: accessToken, fileId: remoteFile.id)
             cachedRemoteBackup = backup
-            remoteDriveLists = backup.snapshot.customerLists
+            remoteDriveLists = backup.snapshot.customerLists.filter { $0.archivedAt == nil }
             driveSyncMessage = "\(remoteDriveLists.count)개 고객리스트를 Drive에서 확인했습니다."
         }
     }
@@ -1126,7 +1534,7 @@ public final class NativeAppState: ObservableObject {
     }
 
     private func restore(snapshot: NativeAppSnapshot) {
-        customerLists = snapshot.customerLists
+        storedCustomerLists = snapshot.customerLists
         customers = snapshot.customers
         visitLogs = snapshot.visitLogs
         contactLogs = snapshot.contactLogs
@@ -1141,8 +1549,14 @@ public final class NativeAppState: ObservableObject {
             : Self.migratingDefaultDashboardColors(snapshot.dashboardStatuses)
         dashboardSettings = snapshot.dashboardSettings
         dashboardSettings.statusCount = dashboardStatuses.count
+        managementPeriods = snapshot.managementPeriods
+        activityEvents = snapshot.activityEvents
+        stageChangeLogs = snapshot.stageChangeLogs
+        deletionTombstones = snapshot.deletionTombstones
         customers = Self.repairingDashboardAssignments(customers, statuses: dashboardStatuses)
-        selectedListId = snapshot.selectedListId ?? customerLists.first?.id
+        selectedListId = snapshot.selectedListId.flatMap { selectedId in
+            customerLists.contains { $0.id == selectedId } ? selectedId : nil
+        } ?? customerLists.first?.id
     }
 
     private func restore(backup: NativeFullBackup, selectedListIds: Set<String>?) {
@@ -1157,7 +1571,7 @@ public final class NativeAppState: ObservableObject {
         let targetCustomerIds = Set(remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }.map(\.id))
         let targetScheduleIds = Set(remoteSnapshot.visitSchedules.filter { selectedListIds.contains($0.customerListId) }.map(\.id))
 
-        customerLists.removeAll { selectedListIds.contains($0.id) }
+        storedCustomerLists.removeAll { selectedListIds.contains($0.id) }
         customers.removeAll { selectedListIds.contains($0.customerListId) }
         visitLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
         contactLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
@@ -1169,6 +1583,14 @@ public final class NativeAppState: ObservableObject {
             campaign.recipients.contains { $0.customerId.map { targetCustomerIds.contains($0) } ?? false }
         }
         contactExportBatches.removeAll { selectedListIds.contains($0.customerListId) }
+        managementPeriods.removeAll { period in
+            period.customerListIds.contains { selectedListIds.contains($0) }
+        }
+        activityEvents.removeAll { event in
+            event.customerListId.map { selectedListIds.contains($0) } ?? false ||
+            event.customerId.map { targetCustomerIds.contains($0) } ?? false
+        }
+        stageChangeLogs.removeAll { selectedListIds.contains($0.customerListId) || targetCustomerIds.contains($0.customerId) }
 
         let restoredLists = remoteSnapshot.customerLists.filter { selectedListIds.contains($0.id) }
         let restoredCustomers = remoteSnapshot.customers.filter { selectedListIds.contains($0.customerListId) }
@@ -1177,7 +1599,7 @@ public final class NativeAppState: ObservableObject {
         let restoredScheduleIds = Set(restoredSchedules.map(\.id))
         let restoredPhotoLogs = remoteSnapshot.photoLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
 
-        customerLists.append(contentsOf: restoredLists)
+        storedCustomerLists.append(contentsOf: restoredLists)
         customers.append(contentsOf: restoredCustomers)
         visitLogs.append(contentsOf: remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) })
         contactLogs.append(contentsOf: remoteSnapshot.contactLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) })
@@ -1189,6 +1611,17 @@ public final class NativeAppState: ObservableObject {
             campaign.recipients.contains { $0.customerId.map { restoredCustomerIds.contains($0) } ?? false }
         })
         contactExportBatches.append(contentsOf: remoteSnapshot.contactExportBatches.filter { selectedListIds.contains($0.customerListId) })
+        managementPeriods.append(contentsOf: remoteSnapshot.managementPeriods.filter { period in
+            period.customerListIds.contains { selectedListIds.contains($0) }
+        })
+        activityEvents.append(contentsOf: remoteSnapshot.activityEvents.filter { event in
+            event.customerListId.map { selectedListIds.contains($0) } ?? false ||
+            event.customerId.map { restoredCustomerIds.contains($0) } ?? false
+        })
+        stageChangeLogs.append(contentsOf: remoteSnapshot.stageChangeLogs.filter {
+            selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId)
+        })
+        deletionTombstones = mergeById(deletionTombstones, remoteSnapshot.deletionTombstones) { $0.deletedAt < $1.deletedAt }
         messageTemplates = mergeById(messageTemplates, remoteSnapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         if !remoteSnapshot.dashboardStatuses.isEmpty {
             dashboardStatuses = Self.migratingDefaultDashboardColors(remoteSnapshot.dashboardStatuses)
@@ -1339,7 +1772,7 @@ public final class NativeAppState: ObservableObject {
     public func resetLocalData(seedSamples: Bool = false) {
         if seedSamples {
             let seed = Self.sampleData()
-            customerLists = seed.lists
+            storedCustomerLists = seed.lists
             customers = seed.customers
             visitLogs = seed.visitLogs
             contactLogs = []
@@ -1351,9 +1784,13 @@ public final class NativeAppState: ObservableObject {
             contactExportBatches = []
             dashboardStatuses = Self.defaultDashboardStatuses()
             dashboardSettings = DashboardHeatmapSettings()
+            managementPeriods = []
+            activityEvents = []
+            stageChangeLogs = []
+            deletionTombstones = []
             selectedListId = seed.lists.first?.id
         } else {
-            customerLists = []
+            storedCustomerLists = []
             customers = []
             visitLogs = []
             contactLogs = []
@@ -1365,6 +1802,10 @@ public final class NativeAppState: ObservableObject {
             contactExportBatches = []
             dashboardStatuses = Self.defaultDashboardStatuses()
             dashboardSettings = DashboardHeatmapSettings()
+            managementPeriods = []
+            activityEvents = []
+            stageChangeLogs = []
+            deletionTombstones = []
             selectedListId = nil
         }
         do {
@@ -1384,8 +1825,135 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
+    private func resolveSelectedList(excluding excludedId: String? = nil) {
+        if let selectedListId,
+           selectedListId != excludedId,
+           customerLists.contains(where: { $0.id == selectedListId }) {
+            return
+        }
+        selectedListId = customerLists.first { $0.id != excludedId }?.id
+    }
+
+    private func recordActivity(
+        kind: CustomerActivityKind,
+        occurredAt: Date,
+        customerListId: String? = nil,
+        customerId: String? = nil,
+        title: String,
+        detail: String = ""
+    ) {
+        activityEvents.insert(
+            CustomerActivityEvent(
+                id: UUID().uuidString,
+                kind: kind,
+                occurredAt: occurredAt,
+                customerListId: customerListId,
+                customerId: customerId,
+                title: title,
+                detail: detail,
+                createdAt: Date()
+            ),
+            at: 0
+        )
+    }
+
+    private func combinedActivityEvents() -> [CustomerActivityEvent] {
+        let customerNames = Dictionary(uniqueKeysWithValues: customers.map { ($0.id, $0.name) })
+        let contactEvents = contactLogs.map { log in
+            let kind: CustomerActivityKind
+            let title: String
+            switch log.type {
+            case .call:
+                kind = .call
+                title = "전화"
+            case .manualSms, .templateSms, .groupSms:
+                kind = .message
+                title = "문자"
+            case .note:
+                kind = .textMemo
+                title = "텍스트 메모"
+            case .statusComplete, .statusReopen:
+                kind = .customerUpdated
+                title = log.type == .statusComplete ? "완료 처리" : "완료 취소"
+            }
+            return CustomerActivityEvent(
+                id: "contact:\(log.id)",
+                kind: kind,
+                occurredAt: log.createdAt,
+                customerListId: log.customerListId,
+                customerId: log.customerId,
+                title: title,
+                detail: log.messageBody ?? customerNames[log.customerId] ?? "",
+                source: .contactLog,
+                sourceRecordId: log.id,
+                createdAt: log.createdAt
+            )
+        }
+        let visitEvents = visitLogs.map { log in
+            let kind: CustomerActivityKind
+            let title: String
+            switch log.kind ?? .completed {
+            case .completed, .quickLocation:
+                kind = .visit
+                title = "방문"
+            case .textMemo:
+                kind = .textMemo
+                title = "텍스트 메모"
+            case .photoMemo:
+                kind = .photoMemo
+                title = "사진 메모"
+            case .voiceMemo:
+                kind = .voiceMemo
+                title = "음성 메모"
+            }
+            return CustomerActivityEvent(
+                id: "visit:\(log.id)",
+                kind: kind,
+                occurredAt: log.visitedAt,
+                customerListId: log.customerListId,
+                customerId: log.customerId,
+                title: title,
+                detail: log.memo ?? log.locationAddress ?? customerNames[log.customerId] ?? "",
+                source: .visitLog,
+                sourceRecordId: log.id,
+                createdAt: log.createdAt
+            )
+        }
+        let photoEvents = photoLogs.map { log in
+            CustomerActivityEvent(
+                id: "photo:\(log.id)",
+                kind: .photoMemo,
+                occurredAt: log.createdAt,
+                customerListId: log.customerListId,
+                customerId: log.customerId,
+                title: "사진 메모",
+                detail: log.caption ?? customerNames[log.customerId] ?? "",
+                source: .photoLog,
+                sourceRecordId: log.id,
+                createdAt: log.createdAt
+            )
+        }
+        let stageEvents = stageChangeLogs.map { log in
+            let previousName = log.previousStageId.flatMap { id in dashboardStatuses.first { $0.id == id }?.name }
+            let nextName = dashboardStatuses.first { $0.id == log.nextStageId }?.name ?? log.nextStageId
+            return CustomerActivityEvent(
+                id: "stage:\(log.id)",
+                kind: .dashboardStageChanged,
+                occurredAt: log.changedAt,
+                customerListId: log.customerListId,
+                customerId: log.customerId,
+                title: "진행 상태 변경",
+                detail: [previousName, nextName].compactMap { $0 }.joined(separator: " -> "),
+                source: .stageChangeLog,
+                sourceRecordId: log.id,
+                createdAt: log.changedAt
+            )
+        }
+        return activityEvents + contactEvents + visitEvents + photoEvents + stageEvents
+    }
+
     private func snapshot(listIds: Set<String>? = nil) -> NativeAppSnapshot {
-        let filteredLists = customerLists.filter { listIds?.contains($0.id) ?? true }
+        let filteredLists = storedCustomerLists.filter { listIds?.contains($0.id) ?? true }
         let filteredListIds = Set(filteredLists.map(\.id))
         let filteredCustomers = customers.filter { filteredListIds.contains($0.customerListId) }
         let filteredCustomerIds = Set(filteredCustomers.map(\.id))
@@ -1408,6 +1976,18 @@ public final class NativeAppState: ObservableObject {
             contactExportBatches: contactExportBatches.filter { filteredListIds.contains($0.customerListId) },
             dashboardStatuses: dashboardStatuses,
             dashboardSettings: dashboardSettings,
+            managementPeriods: managementPeriods.filter { period in
+                listIds == nil || period.customerListIds.contains { filteredListIds.contains($0) }
+            },
+            activityEvents: activityEvents.filter { event in
+                listIds == nil ||
+                event.customerListId.map { filteredListIds.contains($0) } ?? false ||
+                event.customerId.map { filteredCustomerIds.contains($0) } ?? false
+            },
+            stageChangeLogs: stageChangeLogs.filter {
+                listIds == nil || (filteredListIds.contains($0.customerListId) && filteredCustomerIds.contains($0.customerId))
+            },
+            deletionTombstones: deletionTombstones,
             selectedListId: selectedListId.flatMap { filteredListIds.contains($0) ? $0 : nil } ?? filteredLists.first?.id
         )
     }
@@ -1619,16 +2199,54 @@ public final class NativeAppState: ObservableObject {
     }
 
     private func mergeBackups(_ remote: NativeFullBackup, _ local: NativeFullBackup) -> NativeFullBackup {
+        let mergedTombstones = mergeById(remote.snapshot.deletionTombstones, local.snapshot.deletionTombstones) { $0.deletedAt < $1.deletedAt }
+        let deletedListIds = Set(mergedTombstones.filter { $0.kind == .customerList }.map(\.recordId))
         let mergedLists = mergeById(remote.snapshot.customerLists, local.snapshot.customerLists) { $0.updatedAt < $1.updatedAt }
+            .filter { !deletedListIds.contains($0.id) }
+        let validListIds = Set(mergedLists.map(\.id))
         let mergedCustomers = mergeById(remote.snapshot.customers, local.snapshot.customers) { $0.updatedAt < $1.updatedAt }
+            .filter { validListIds.contains($0.customerListId) }
+        let validCustomerIds = Set(mergedCustomers.map(\.id))
         let mergedVisitLogs = mergeById(remote.snapshot.visitLogs, local.snapshot.visitLogs) { $0.createdAt < $1.createdAt }
+            .filter { validListIds.contains($0.customerListId) && validCustomerIds.contains($0.customerId) }
         let mergedContactLogs = mergeById(remote.snapshot.contactLogs, local.snapshot.contactLogs) { $0.createdAt < $1.createdAt }
+            .filter { validListIds.contains($0.customerListId) && validCustomerIds.contains($0.customerId) }
         let mergedPhotoLogs = mergeById(remote.snapshot.photoLogs, local.snapshot.photoLogs) { $0.createdAt < $1.createdAt }
+            .filter { validListIds.contains($0.customerListId) && validCustomerIds.contains($0.customerId) }
         let mergedSchedules = mergeById(remote.snapshot.visitSchedules, local.snapshot.visitSchedules) { $0.updatedAt < $1.updatedAt }
+            .filter { validListIds.contains($0.customerListId) }
+        let validScheduleIds = Set(mergedSchedules.map(\.id))
         let mergedScheduleItems = mergeById(remote.snapshot.visitScheduleItems, local.snapshot.visitScheduleItems) { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
+            .filter {
+                validListIds.contains($0.customerListId) &&
+                validScheduleIds.contains($0.scheduleId) &&
+                validCustomerIds.contains($0.customerId)
+            }
         let mergedTemplates = mergeById(remote.snapshot.messageTemplates, local.snapshot.messageTemplates) { $0.updatedAt < $1.updatedAt }
         let mergedGroupSmsCampaigns = mergeById(remote.snapshot.groupSmsCampaigns, local.snapshot.groupSmsCampaigns) { $0.updatedAt < $1.updatedAt }
+            .filter { campaign in
+                if let listId = campaign.customerListId, deletedListIds.contains(listId) { return false }
+                return !campaign.recipients.contains { recipient in
+                    recipient.customerId.map { !validCustomerIds.contains($0) } ?? false
+                }
+            }
         let mergedContactExportBatches = mergeById(remote.snapshot.contactExportBatches, local.snapshot.contactExportBatches) { $0.updatedAt < $1.updatedAt }
+            .filter { validListIds.contains($0.customerListId) }
+        let mergedPeriods = mergeById(remote.snapshot.managementPeriods, local.snapshot.managementPeriods) { $0.updatedAt < $1.updatedAt }
+            .compactMap { period -> ManagementPeriod? in
+                var resolved = period
+                resolved.customerListIds.removeAll { !validListIds.contains($0) }
+                resolved.customerIds.removeAll { !validCustomerIds.contains($0) }
+                return resolved.customerListIds.isEmpty ? nil : resolved
+            }
+        let mergedActivityEvents = mergeById(remote.snapshot.activityEvents, local.snapshot.activityEvents) { $0.createdAt < $1.createdAt }
+            .filter { event in
+                if let listId = event.customerListId, !validListIds.contains(listId) { return false }
+                if let customerId = event.customerId, !validCustomerIds.contains(customerId) { return false }
+                return true
+            }
+        let mergedStageChangeLogs = mergeById(remote.snapshot.stageChangeLogs, local.snapshot.stageChangeLogs) { $0.changedAt < $1.changedAt }
+            .filter { validListIds.contains($0.customerListId) && validCustomerIds.contains($0.customerId) }
         let localDashboardSettingsAreNewer = remote.snapshot.dashboardSettings.updatedAt < local.snapshot.dashboardSettings.updatedAt
         let mergedDashboardSettings = localDashboardSettingsAreNewer
             ? local.snapshot.dashboardSettings
@@ -1656,14 +2274,26 @@ public final class NativeAppState: ObservableObject {
             contactExportBatches: mergedContactExportBatches,
             dashboardStatuses: mergedDashboardStatuses.sorted { $0.orderIndex < $1.orderIndex },
             dashboardSettings: resolvedDashboardSettings,
-            selectedListId: local.snapshot.selectedListId ?? remote.snapshot.selectedListId,
+            managementPeriods: mergedPeriods,
+            activityEvents: mergedActivityEvents,
+            stageChangeLogs: mergedStageChangeLogs,
+            deletionTombstones: mergedTombstones,
+            selectedListId: [local.snapshot.selectedListId, remote.snapshot.selectedListId]
+                .compactMap { $0 }
+                .first { validListIds.contains($0) }
+                ?? mergedLists.first(where: { $0.archivedAt == nil })?.id,
             savedAt: Date()
         )
+        let validPhotoFileNames = Set(mergedPhotoLogs.flatMap { [$0.fileName, $0.thumbnailFileName] })
         let mergedPhotos = mergeById(remote.photos, local.photos) { lhs, rhs in
             (lhs.imageDataBase64 == nil && rhs.imageDataBase64 != nil) || (lhs.thumbnailDataBase64 == nil && rhs.thumbnailDataBase64 != nil)
-        }
+        }.filter { validPhotoFileNames.contains($0.fileName) || validPhotoFileNames.contains($0.thumbnailFileName) }
+        let validVisitAssetFileNames = Set(mergedVisitLogs.flatMap { [$0.mapSnapshotFileName, $0.audioFileName].compactMap { $0 } })
         let mergedVisitAssets = mergeById(remote.visitAssets, local.visitAssets) { lhs, rhs in
             (lhs.mapSnapshotDataBase64 == nil && rhs.mapSnapshotDataBase64 != nil) || (lhs.audioDataBase64 == nil && rhs.audioDataBase64 != nil)
+        }.filter { asset in
+            validVisitAssetFileNames.contains(asset.mapSnapshotFileName ?? "") ||
+            validVisitAssetFileNames.contains(asset.audioFileName ?? "")
         }
         return NativeFullBackup(schemaVersion: max(remote.schemaVersion, local.schemaVersion), snapshot: snapshot, photos: mergedPhotos, visitAssets: mergedVisitAssets)
     }
