@@ -1159,7 +1159,9 @@ private func scoreOCRTable(_ table: OcrTable) -> Double {
     let sparseRowCount = filledCounts.filter { Double($0) < max(typicalFilledCount - 1, 1) }.count
     let longCellRatio = Double(nonemptyCells.filter { $0.text.count >= 34 }.count) / Double(max(nonemptyCells.count, 1))
     let veryLongCellRatio = Double(nonemptyCells.filter { $0.text.count >= 60 }.count) / Double(max(nonemptyCells.count, 1))
-    let recordCollisionCount = nonemptyCells.reduce(0) { $0 + recordCollisionCount(in: $1.text) }
+    let recordCollisionPenalty = nonemptyCells.reduce(0) { partialResult, cell in
+        partialResult + recordCollisionCount(in: cell.text)
+    }
     let bodySignalRowCount = nonemptyRows.filter { bodyIdentitySignalCount(in: $0) >= 2 }.count
     let columnScore: Double
     if table.columnCount == 1 {
@@ -1170,18 +1172,28 @@ private func scoreOCRTable(_ table: OcrTable) -> Double {
         columnScore = 12 - Double(table.columnCount - 16) * 3
     }
 
-    return Double(min(nonemptyRows.count, 80)) * 0.4
+    let rowScore = Double(min(nonemptyRows.count, 80)) * 0.4
+    let cellScore = Double(min(nonemptyCells.count, 240)) * 0.22
+    let densityScore = filledRatio * 24
+    let coverageScore = min(averageFilledCellsPerRow, 5) * 10
+    let bodySignalScore = Double(bodySignalRowCount) * 2
+    let directionScore = sequentialRowDirectionScore(table.rows)
+    let sparseRowPenalty = Double(sparseRowCount) * 2.5
+    let warningPenalty = Double(table.warnings.count) * 0.25
+
+    let positiveScore = rowScore
         + columnScore
-        + Double(min(nonemptyCells.count, 240)) * 0.22
-        + filledRatio * 24
-        + min(averageFilledCellsPerRow, 5) * 10
-        + Double(bodySignalRowCount) * 2
-        + sequentialRowDirectionScore(table.rows)
-        - Double(sparseRowCount) * 2.5
-        - longCellRatio * 70
-        - veryLongCellRatio * 120
-        - Double(recordCollisionCount)
-        - Double(table.warnings.count) * 0.25
+        + cellScore
+        + densityScore
+        + coverageScore
+        + bodySignalScore
+        + directionScore
+    let penaltyScore = sparseRowPenalty
+        + longCellRatio * 70
+        + veryLongCellRatio * 120
+        + Double(recordCollisionPenalty)
+        + warningPenalty
+    return positiveScore - penaltyScore
 }
 
 private func recordCollisionCount(in text: String) -> Int {
