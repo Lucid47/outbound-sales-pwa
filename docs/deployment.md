@@ -37,12 +37,15 @@ Apple Developer Team: 35PZ4DJ283
 최근 업로드: 빌드 3 (2026-07-14)
 ```
 
+빌드별 기능, Git 태그, 데이터 호환성과 원복 절차는 `docs/release-history.md`를 기준으로 관리합니다.
+
 TestFlight 업로드는 iOS/iPadOS 바이너리를 대상으로 합니다. App Store Connect 앱 레코드에서 macOS 플랫폼을 함께 선택했더라도 macOS 타깃 또는 Mac Catalyst 빌드를 별도로 만들기 전까지 macOS 앱은 포함되지 않습니다.
 
 ### 빌드 전 확인
 
 - `MARKETING_VERSION`은 사용자에게 표시할 앱 버전입니다.
 - `CURRENT_PROJECT_VERSION`은 업로드마다 증가해야 하는 빌드 번호입니다.
+- 실제 업로드 소스에는 `testflight/<버전>-build-<번호>` 형식의 Git 태그를 생성합니다.
 - `Info.plist`의 `CFBundleVersion`은 `$(CURRENT_PROJECT_VERSION)`을 사용합니다.
 - 앱 아이콘 PNG에는 알파 채널이 없어야 합니다.
 - 앱은 HTTPS, Apple Keychain, CryptoKit의 PKCE SHA-256 등 Apple 운영체제에 포함된 면제 암호화만 사용합니다.
