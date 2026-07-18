@@ -34,8 +34,9 @@ main 브랜치 push
 Bundle ID: com.lucid47.outboundsales
 Apple Developer Team: 35PZ4DJ283
 버전: 1.0
-최근 업로드: 빌드 3 (2026-07-14)
-다음 업로드: 빌드 4, 커밋 7bc2855 (Xcode 26.6 테스트 통과·재아카이브 준비)
+최근 업로드: 빌드 4 (2026-07-18)
+업로드 소스: testflight/1.0-build-4, 커밋 d44a03674b60ec95f7a50f3cf916b6d5dd721fea
+업로드 도구: Xcode 26.6, iOS 26.5 SDK
 ```
 
 빌드별 기능, Git 태그, 데이터 호환성과 원복 절차는 `docs/release-history.md`를 기준으로 관리합니다.
