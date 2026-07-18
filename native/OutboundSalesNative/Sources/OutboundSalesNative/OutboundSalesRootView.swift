@@ -506,6 +506,16 @@ struct ActiveListPanel: View {
                 .tint(.white)
                 .foregroundStyle(Color(red: 0.086, green: 0.125, blue: 0.196))
 
+                NavigationLink {
+                    CustomerListManagementView()
+                        .environmentObject(state)
+                } label: {
+                    Label("리스트 관리", systemImage: "folder.badge.gearshape")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.286, green: 0.333, blue: 0.424))
+
                 Button {
                     showingContactExport = true
                 } label: {

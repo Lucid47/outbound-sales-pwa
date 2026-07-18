@@ -609,6 +609,13 @@ public final class NativeAppState: ObservableObject {
         )
         storedCustomerLists.insert(list, at: 0)
         selectedListId = list.id
+        recordActivity(
+            kind: .listCreated,
+            occurredAt: now,
+            customerListId: list.id,
+            title: "고객리스트 생성",
+            detail: resolvedListName
+        )
         persist()
     }
 
@@ -638,6 +645,20 @@ public final class NativeAppState: ObservableObject {
         customers.append(contentsOf: importedCustomers)
         selectedListId = list.id
         importMessage = "\(importedCustomers.count)명의 고객을 가져왔습니다."
+        recordActivity(
+            kind: .listCreated,
+            occurredAt: now,
+            customerListId: list.id,
+            title: "고객리스트 생성",
+            detail: resolvedListName
+        )
+        recordActivity(
+            kind: .customersImported,
+            occurredAt: now,
+            customerListId: list.id,
+            title: "고객 가져오기",
+            detail: "\(sourceFileName), \(importedCustomers.count)명"
+        )
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -656,6 +677,13 @@ public final class NativeAppState: ObservableObject {
         storedCustomerLists[listIndex].updatedAt = now
         selectedListId = listId
         importMessage = "\(storedCustomerLists[listIndex].name)에 \(importedCustomers.count)명의 고객을 추가했습니다."
+        recordActivity(
+            kind: .customersImported,
+            occurredAt: now,
+            customerListId: listId,
+            title: "고객 추가 가져오기",
+            detail: "\(sourceFileName), \(importedCustomers.count)명"
+        )
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -679,6 +707,20 @@ public final class NativeAppState: ObservableObject {
         customers.append(contentsOf: importedCustomers.customers)
         selectedListId = list.id
         importMessage = "\(importedCustomers.customers.count)명의 연락처를 가져왔습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
+        recordActivity(
+            kind: .listCreated,
+            occurredAt: now,
+            customerListId: list.id,
+            title: "고객리스트 생성",
+            detail: resolvedListName
+        )
+        recordActivity(
+            kind: .customersImported,
+            occurredAt: now,
+            customerListId: list.id,
+            title: "연락처에서 고객 가져오기",
+            detail: "\(importedCustomers.customers.count)명, 중복 제외 \(importedCustomers.skippedCount)명"
+        )
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -697,6 +739,13 @@ public final class NativeAppState: ObservableObject {
         storedCustomerLists[listIndex].updatedAt = now
         selectedListId = listId
         importMessage = "\(storedCustomerLists[listIndex].name)에 \(importedCustomers.customers.count)명의 연락처를 추가했습니다." + (importedCustomers.skippedCount > 0 ? " 중복 \(importedCustomers.skippedCount)명은 건너뛰었습니다." : "")
+        recordActivity(
+            kind: .customersImported,
+            occurredAt: now,
+            customerListId: listId,
+            title: "연락처에서 고객 추가",
+            detail: "\(importedCustomers.customers.count)명, 중복 제외 \(importedCustomers.skippedCount)명"
+        )
         persist()
         Task {
             await geocodeVisibleCustomers()
@@ -735,35 +784,49 @@ public final class NativeAppState: ObservableObject {
     public func addCustomer(to listId: String, name: String, phoneNumber: String, address: String, notes: String) {
         guard customerLists.contains(where: { $0.id == listId }) else { return }
         let now = Date()
-        customers.insert(
-            Customer(
-                id: UUID().uuidString,
-                customerListId: listId,
-                name: name,
-                phoneNumber: phoneNumber,
-                address: address,
-                notes: notes,
-                region: extractRegion(address),
-                status: .open,
-                createdAt: now,
-                updatedAt: now
-            ),
-            at: 0
+        let customer = Customer(
+            id: UUID().uuidString,
+            customerListId: listId,
+            name: name,
+            phoneNumber: phoneNumber,
+            address: address,
+            notes: notes,
+            region: extractRegion(address),
+            status: .open,
+            createdAt: now,
+            updatedAt: now
         )
+        customers.insert(customer, at: 0)
         selectedListId = listId
+        recordActivity(
+            kind: .customerCreated,
+            occurredAt: now,
+            customerListId: listId,
+            customerId: customer.id,
+            title: "고객 추가",
+            detail: customer.name
+        )
         persist()
-        let customerId = customers.first?.id
         Task {
-            await geocodeCustomerIfNeeded(id: customerId)
+            await geocodeCustomerIfNeeded(id: customer.id)
         }
     }
 
     public func updateCustomer(_ customer: Customer, name: String, phoneNumber: String, address: String, birthDate: String, notes: String) {
         guard let index = customers.firstIndex(where: { $0.id == customer.id }) else { return }
+        let resolvedBirthDate = birthDate.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        var changedFields: [String] = []
+        if customers[index].name != name { changedFields.append("이름") }
+        if customers[index].phoneNumber != phoneNumber { changedFields.append("연락처") }
+        if customers[index].address != address { changedFields.append("주소") }
+        if customers[index].birthDate != resolvedBirthDate { changedFields.append("생년월일") }
+        if customers[index].notes != notes { changedFields.append("메모") }
+        guard !changedFields.isEmpty else { return }
+        let now = Date()
         customers[index].name = name
         customers[index].phoneNumber = phoneNumber
         customers[index].address = address
-        customers[index].birthDate = birthDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : birthDate
+        customers[index].birthDate = resolvedBirthDate
         customers[index].notes = notes
         customers[index].region = extractRegion(address)
         if customer.address != address {
@@ -773,7 +836,15 @@ public final class NativeAppState: ObservableObject {
             customers[index].geocodedAt = nil
             customers[index].geocodeQuery = nil
         }
-        customers[index].updatedAt = Date()
+        customers[index].updatedAt = now
+        recordActivity(
+            kind: .customerUpdated,
+            occurredAt: now,
+            customerListId: customers[index].customerListId,
+            customerId: customer.id,
+            title: "고객 정보 수정",
+            detail: changedFields.joined(separator: ", ")
+        )
         persist()
         Task {
             await geocodeCustomerIfNeeded(id: customer.id)
@@ -825,8 +896,22 @@ public final class NativeAppState: ObservableObject {
     public func setDashboardStatus(customerId: String, statusId: String) {
         guard dashboardStatuses.contains(where: { $0.id == statusId }),
               let index = customers.firstIndex(where: { $0.id == customerId }) else { return }
+        let previousStatusId = customers[index].dashboardStatusId ?? dashboardStatuses.first?.id
+        guard previousStatusId != statusId else { return }
+        let now = Date()
         customers[index].dashboardStatusId = statusId
-        customers[index].updatedAt = Date()
+        customers[index].updatedAt = now
+        stageChangeLogs.insert(
+            CustomerStageChangeLog(
+                id: UUID().uuidString,
+                customerListId: customers[index].customerListId,
+                customerId: customerId,
+                previousStageId: previousStatusId,
+                nextStageId: statusId,
+                changedAt: now
+            ),
+            at: 0
+        )
         persist()
     }
 
@@ -1250,6 +1335,7 @@ public final class NativeAppState: ObservableObject {
     public func addToTodaySchedule(_ customer: Customer) {
         guard let schedule = ensureTodaySchedule() else { return }
         guard !visitScheduleItems.contains(where: { $0.scheduleId == schedule.id && $0.customerId == customer.id }) else { return }
+        let now = Date()
         let orderIndex = visitScheduleItems.filter { $0.scheduleId == schedule.id }.count
         visitScheduleItems.append(
             VisitScheduleItem(
@@ -1261,12 +1347,30 @@ public final class NativeAppState: ObservableObject {
                 status: .pending
             )
         )
+        recordActivity(
+            kind: .scheduleAdded,
+            occurredAt: now,
+            customerListId: customer.customerListId,
+            customerId: customer.id,
+            title: "오늘 스케줄 추가",
+            detail: customer.name
+        )
         persist()
     }
 
     public func removeFromTodaySchedule(_ customer: Customer) {
         guard let schedule = todaySchedule else { return }
+        guard visitScheduleItems.contains(where: { $0.scheduleId == schedule.id && $0.customerId == customer.id }) else { return }
+        let now = Date()
         visitScheduleItems.removeAll { $0.scheduleId == schedule.id && $0.customerId == customer.id }
+        recordActivity(
+            kind: .scheduleRemoved,
+            occurredAt: now,
+            customerListId: customer.customerListId,
+            customerId: customer.id,
+            title: "오늘 스케줄 해제",
+            detail: customer.name
+        )
         persist()
     }
 

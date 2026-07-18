@@ -794,6 +794,21 @@ struct LogsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("관리 도구") {
+                    NavigationLink {
+                        ManagementPeriodsView()
+                            .environmentObject(state)
+                    } label: {
+                        Label("관리 기간", systemImage: "calendar.badge.clock")
+                    }
+                    NavigationLink {
+                        ActivityReportView()
+                            .environmentObject(state)
+                    } label: {
+                        Label("내 활동", systemImage: "chart.bar.xaxis")
+                    }
+                }
+
                 Section("누적 상태") {
                     historyFilterRow(.all, count: state.visibleCustomers.count)
                     historyFilterRow(.touched, count: touchedCustomerCount)
