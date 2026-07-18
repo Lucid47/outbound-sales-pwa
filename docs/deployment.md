@@ -35,6 +35,7 @@ Bundle ID: com.lucid47.outboundsales
 Apple Developer Team: 35PZ4DJ283
 버전: 1.0
 최근 업로드: 빌드 3 (2026-07-14)
+다음 업로드: 빌드 4, 커밋 7bc2855 (Xcode 26.6 테스트 통과·재아카이브 준비)
 ```
 
 빌드별 기능, Git 태그, 데이터 호환성과 원복 절차는 `docs/release-history.md`를 기준으로 관리합니다.
@@ -53,10 +54,12 @@ TestFlight 업로드는 iOS/iPadOS 바이너리를 대상으로 합니다. App S
 
 ### 아카이브와 업로드
 
-Xcode 베타가 다운로드 폴더에 설치된 현재 개발 환경의 예시입니다.
+App Store Connect가 현재 허용하는 Xcode 버전을 먼저 확인해야 합니다. 기존 TestFlight 빌드는 계속 실행되더라도, 지원 기간이 지난 beta Xcode로 만든 새 빌드는 업로드 단계에서 거절될 수 있습니다. 2026-07-18 기준 제출용 기본 도구는 Xcode 26.6이며 Xcode 27 beta를 사용하려면 beta 3 이상이어야 합니다.
+
+안정판 Xcode가 `/Applications/Xcode.app`에 설치된 환경의 예시입니다.
 
 ```bash
-DEVELOPER_DIR=/Users/daehee/Downloads/Xcode-beta.app/Contents/Developer \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 xcodebuild \
   -project native/OutboundSalesiOS/OutboundSalesiOS.xcodeproj \
   -scheme OutboundSalesiOS \
@@ -70,7 +73,7 @@ xcodebuild \
 ExportOptions plist에는 `method=app-store-connect`, `destination=upload`, `signingStyle=automatic`, `teamID=35PZ4DJ283`을 사용합니다.
 
 ```bash
-DEVELOPER_DIR=/Users/daehee/Downloads/Xcode-beta.app/Contents/Developer \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 xcodebuild \
   -exportArchive \
   -archivePath /tmp/SoheeyaGaja-TestFlight.xcarchive \
