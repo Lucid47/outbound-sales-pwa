@@ -38,6 +38,7 @@ Apple Developer Team: 35PZ4DJ283
 업로드 소스: testflight/1.0-build-4, 커밋 d44a03674b60ec95f7a50f3cf916b6d5dd721fea
 업로드 도구: Xcode 26.6, iOS 26.5 SDK
 TestFlight 상태: 내부 기능 검증·외부 베타 테스트 그룹 배포 완료
+다음 배포: 빌드 5 (2026-07-20), 프로젝트 번호 반영 및 업로드 준비
 ```
 
 빌드별 기능, Git 태그, 데이터 호환성과 원복 절차는 `docs/release-history.md`를 기준으로 관리합니다.
