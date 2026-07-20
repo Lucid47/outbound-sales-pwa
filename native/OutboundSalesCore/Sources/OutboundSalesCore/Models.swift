@@ -358,6 +358,7 @@ public struct CustomerStageChangeLog: Identifiable, Codable, Equatable, Sendable
 
 public enum DeletedRecordKind: String, Codable, Sendable {
     case customerList
+    case customer
 }
 
 public struct DeletedRecordTombstone: Identifiable, Codable, Equatable, Sendable {
@@ -386,6 +387,38 @@ public struct DashboardStatusDefinition: Identifiable, Codable, Equatable, Senda
         self.colorHex = colorHex
         self.orderIndex = orderIndex
         self.updatedAt = updatedAt
+    }
+}
+
+public enum CustomerAddressKind: String, Codable, CaseIterable, Hashable, Sendable {
+    case ownedProperty
+    case parcel
+    case other
+}
+
+public struct CustomerAddress: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+    public var value: String
+    public var kind: CustomerAddressKind
+
+    public init(id: String, label: String, value: String, kind: CustomerAddressKind) {
+        self.id = id
+        self.label = label
+        self.value = value
+        self.kind = kind
+    }
+}
+
+public struct CustomerCustomField: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+    public var value: String
+
+    public init(id: String, label: String, value: String) {
+        self.id = id
+        self.label = label
+        self.value = value
     }
 }
 
@@ -433,6 +466,8 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
     public var address: String
     public var birthDate: String?
     public var notes: String
+    public var additionalAddresses: [CustomerAddress]?
+    public var customFields: [CustomerCustomField]?
     public var latitude: Double?
     public var longitude: Double?
     public var coordinateSource: CoordinateSource?
@@ -457,6 +492,8 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         address: String,
         birthDate: String? = nil,
         notes: String,
+        additionalAddresses: [CustomerAddress]? = nil,
+        customFields: [CustomerCustomField]? = nil,
         latitude: Double? = nil,
         longitude: Double? = nil,
         coordinateSource: CoordinateSource? = nil,
@@ -480,6 +517,8 @@ public struct Customer: Identifiable, Codable, Equatable, Sendable {
         self.address = address
         self.birthDate = birthDate
         self.notes = notes
+        self.additionalAddresses = additionalAddresses
+        self.customFields = customFields
         self.latitude = latitude
         self.longitude = longitude
         self.coordinateSource = coordinateSource

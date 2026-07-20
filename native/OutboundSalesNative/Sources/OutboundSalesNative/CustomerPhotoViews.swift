@@ -17,7 +17,9 @@ struct CustomerPhotoCaptureSheet: View {
     var visitKind: VisitLogKind?
     var onSaved: (() -> Void)?
     #if os(iOS)
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingPhotoData: [Data] = []
+    @State private var showingPhotoImportConfirmation = false
     @State private var showingCamera = false
     @State private var isImportingPhoto = false
     #else
@@ -48,7 +50,9 @@ struct CustomerPhotoCaptureSheet: View {
                     .disabled(isImportingPhoto)
 
                     PhotosPicker(
-                        selection: $selectedPhotoItem,
+                        selection: $selectedPhotoItems,
+                        maxSelectionCount: 20,
+                        selectionBehavior: .ordered,
                         matching: .images,
                         photoLibrary: .shared()
                     ) {
@@ -91,9 +95,19 @@ struct CustomerPhotoCaptureSheet: View {
                 }
             }
             #if os(iOS)
-            .onChange(of: selectedPhotoItem) { _, item in
-                guard let item else { return }
-                Task { await addPhotoItem(item) }
+            .onChange(of: selectedPhotoItems) { _, items in
+                guard !items.isEmpty else { return }
+                Task { await preparePhotoItems(items) }
+            }
+            .confirmationDialog(
+                "선택한 사진을 추가할까요?",
+                isPresented: $showingPhotoImportConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("\(pendingPhotoData.count)장 추가") { savePendingPhotos() }
+                Button("취소", role: .cancel) { clearPendingPhotos() }
+            } message: {
+                Text("사진은 \(customer.name.isEmpty ? "이 고객" : customer.name)의 사진 메모로 앱 저장소에 별도 보관됩니다.")
             }
             .sheet(isPresented: $showingCamera) {
                 CameraCaptureView { url in
@@ -133,25 +147,47 @@ struct CustomerPhotoCaptureSheet: View {
     }
 
     #if os(iOS)
-    private func addPhotoItem(_ item: PhotosPickerItem) async {
+    private func preparePhotoItems(_ items: [PhotosPickerItem]) async {
         isImportingPhoto = true
         defer {
-            selectedPhotoItem = nil
+            selectedPhotoItems = []
             isImportingPhoto = false
         }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                state.actionMessage = "사진을 읽지 못했습니다."
-                return
+        var loaded: [Data] = []
+        for item in items {
+            do {
+                if let data = try await item.loadTransferable(type: Data.self) {
+                    loaded.append(data)
+                }
+            } catch {
+                continue
             }
-            state.addPhoto(customer: customer, imageData: data, source: .photoLibrary)
-            if visitKind == .photoMemo {
-                onSaved?()
-                dismiss()
-            }
-        } catch {
-            state.actionMessage = "사진을 읽지 못했습니다."
         }
+        guard !loaded.isEmpty else {
+            state.actionMessage = "선택한 사진을 읽지 못했습니다."
+            return
+        }
+        pendingPhotoData = loaded
+        showingPhotoImportConfirmation = true
+    }
+
+    private func savePendingPhotos() {
+        for data in pendingPhotoData {
+            state.addPhoto(customer: customer, imageData: data, source: .photoLibrary)
+        }
+        let savedCount = pendingPhotoData.count
+        clearPendingPhotos()
+        state.actionMessage = "사진 \(savedCount)장을 추가했습니다."
+        if visitKind == .photoMemo {
+            onSaved?()
+            dismiss()
+        }
+    }
+
+    private func clearPendingPhotos() {
+        pendingPhotoData = []
+        selectedPhotoItems = []
+        showingPhotoImportConfirmation = false
     }
     #endif
 }

@@ -24,7 +24,6 @@ private enum GroupSmsTargetScope: String, CaseIterable, Identifiable {
 struct GroupSmsTestView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.openURL) private var openURL
-    @AppStorage("groupSmsShortcutInstallURL") private var shortcutInstallURLText = ""
     @AppStorage("groupSmsShortcutVerified") private var shortcutVerified = false
     @AppStorage("groupSmsShortcutVerifiedAt") private var shortcutVerifiedAt = ""
     @AppStorage("groupSmsShortcutVerifiedVersion") private var shortcutVerifiedVersion = ""
@@ -115,9 +114,7 @@ struct GroupSmsTestView: View {
     }
 
     private var shortcutInstallURL: URL? {
-        let trimmed = shortcutInstallURLText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return URL(string: trimmed)
+        SoheeGroupSmsProductConfiguration.shortcutInstallURL
     }
 
     var body: some View {
@@ -152,14 +149,12 @@ struct GroupSmsTestView: View {
                         }
                     }
 
-                    TextField("iCloud 단축어 공유 링크", text: $shortcutInstallURLText, axis: .vertical)
-
                     Button {
                         openShortcutInstallLink()
                     } label: {
-                        Label("단축어 설치하기", systemImage: "square.and.arrow.down")
+                        Label(automationReadiness == .ready ? "단축어 재설치·업데이트" : "단체문자 단축어 설치", systemImage: "square.and.arrow.down")
                     }
-                    .disabled(shortcutInstallURL == nil)
+                    .buttonStyle(.borderedProminent)
 
                     Button {
                         openShortcutForVerification()
@@ -179,7 +174,7 @@ struct GroupSmsTestView: View {
                         Label("단축어 구성 안내 복사", systemImage: "doc.on.doc")
                     }
 
-                    Text("앱이 단축어를 자동 설치할 수는 없습니다. 설치 버튼은 Shortcuts 앱의 추가 화면을 열고, 사용자가 직접 단축어 추가를 눌러야 합니다.")
+                    Text("설치 버튼을 누르면 Apple 단축어 추가 화면이 열립니다. 단축어 추가를 누른 뒤 앱으로 돌아와 설치 확인과 본인 번호 시험을 진행하세요.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -569,7 +564,7 @@ struct GroupSmsTestView: View {
 
     private func openShortcutInstallLink() {
         guard let shortcutInstallURL else {
-            statusMessage = "단축어 설치 링크를 입력하세요."
+            statusMessage = "단축어 설치 링크를 열 수 없습니다."
             return
         }
         openURL(shortcutInstallURL) { accepted in

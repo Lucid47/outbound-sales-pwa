@@ -64,7 +64,16 @@ public func parseCSV(_ text: String, firstRowIsHeader: Bool = true) throws -> Pa
 
 public func customersFromCSV(_ parsed: ParsedCSV, customerListId: String, now: Date = Date(), idGenerator: () -> String = { UUID().uuidString }) -> [Customer] {
     parsed.rows.map { row in
-        Customer(
+        let ownedAddress = fieldValue(.ownedAddress, row: row, mapping: parsed.mapping)
+        let parcelAddress = fieldValue(.parcelAddress, row: row, mapping: parsed.mapping)
+        var additionalAddresses: [CustomerAddress] = []
+        if !ownedAddress.isEmpty {
+            additionalAddresses.append(CustomerAddress(id: idGenerator(), label: "소유지", value: ownedAddress, kind: .ownedProperty))
+        }
+        if !parcelAddress.isEmpty {
+            additionalAddresses.append(CustomerAddress(id: idGenerator(), label: "지번", value: parcelAddress, kind: .parcel))
+        }
+        return Customer(
             id: idGenerator(),
             customerListId: customerListId,
             name: fieldValue(.name, row: row, mapping: parsed.mapping),
@@ -72,6 +81,7 @@ public func customersFromCSV(_ parsed: ParsedCSV, customerListId: String, now: D
             address: fieldValue(.address, row: row, mapping: parsed.mapping),
             birthDate: parseBirthDate(fieldValue(.birthDate, row: row, mapping: parsed.mapping)),
             notes: fieldValue(.notes, row: row, mapping: parsed.mapping),
+            additionalAddresses: additionalAddresses.isEmpty ? nil : additionalAddresses,
             latitude: parseCoordinate(fieldValue(.latitude, row: row, mapping: parsed.mapping), kind: .latitude),
             longitude: parseCoordinate(fieldValue(.longitude, row: row, mapping: parsed.mapping), kind: .longitude),
             coordinateSource: coordinateSource(row: row, mapping: parsed.mapping),

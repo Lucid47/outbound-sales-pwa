@@ -11,6 +11,7 @@ import AppKit
 struct CustomerDetailView: View {
     @EnvironmentObject private var state: NativeAppState
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
     let customerId: String
     @State private var showingEdit = false
     @State private var showingMessageSheet = false
@@ -21,6 +22,7 @@ struct CustomerDetailView: View {
     @State private var selectedTextMemo: VisitLog?
     @State private var selectedVoiceMemo: VisitLog?
     @State private var callFallbackMessage: String?
+    @State private var showingDeleteConfirmation = false
 
     private var customer: Customer? {
         state.customers.first { $0.id == customerId }
@@ -41,6 +43,28 @@ struct CustomerDetailView: View {
                         if !customer.notes.isEmpty {
                             Text(customer.notes)
                                 .foregroundStyle(.secondary)
+                        }
+                        ForEach(customer.customFields ?? []) { field in
+                            LabeledContent(field.label, value: field.value)
+                        }
+                    }
+
+                    if !(customer.additionalAddresses ?? []).isEmpty {
+                        Section("추가 주소") {
+                            ForEach(customer.additionalAddresses ?? []) { address in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(address.label)
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                    Text(address.value)
+                                    Button {
+                                        openDirections(address: address.value, customerName: customer.name)
+                                    } label: {
+                                        Label("이 주소로 길찾기", systemImage: "location")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -192,6 +216,17 @@ struct CustomerDetailView: View {
                             }
                         }
                     }
+
+                    Section("고객 삭제") {
+                        Button(role: .destructive) {
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("고객 영구삭제", systemImage: "trash")
+                        }
+                        Text("앱의 고객 정보와 연결된 사진·음성·스케줄 기록을 삭제합니다. iPhone 연락처는 삭제하지 않습니다.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .navigationTitle(customer.name.isEmpty ? "고객 상세" : customer.name)
                 .toolbar {
@@ -243,6 +278,16 @@ struct CustomerDetailView: View {
                     Button("확인", role: .cancel) {}
                 } message: {
                     Text(callFallbackMessage ?? "")
+                }
+                .alert("고객을 영구삭제할까요?", isPresented: $showingDeleteConfirmation) {
+                    Button("영구삭제", role: .destructive) {
+                        state.permanentlyDeleteCustomer(id: customer.id)
+                        dismiss()
+                    }
+                    Button("취소", role: .cancel) {}
+                } message: {
+                    let impact = state.deletionImpact(forCustomerId: customer.id)
+                    Text("방문·메모 \(impact.visitLogCount)건, 터치 \(impact.contactLogCount)건, 사진 \(impact.photoLogCount)건, 스케줄 \(impact.scheduleItemCount)건을 함께 삭제합니다. 이 작업은 되돌릴 수 없습니다.")
                 }
             } else {
                 ContentUnavailableView("고객을 찾을 수 없습니다.", systemImage: "person.crop.circle.badge.questionmark")
@@ -301,6 +346,18 @@ struct CustomerDetailView: View {
         let normalized = normalizeAddressForMapSearch(customer.address)
         return normalized.isEmpty ? customer.address : normalized
     }
+
+    private func openDirections(address: String, customerName: String) {
+        let normalized = normalizeAddressForMapSearch(address)
+        let query = normalized.isEmpty ? address : normalized
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let tmapURL = URL(string: "tmap://?search=\(encoded)") else { return }
+        openURL(tmapURL) { accepted in
+            if !accepted, let appleURL = URL(string: "http://maps.apple.com/?daddr=\(encoded)") {
+                openURL(appleURL)
+            }
+        }
+    }
 }
 
 struct EditCustomerView: View {
@@ -312,6 +369,8 @@ struct EditCustomerView: View {
     @State private var address: String
     @State private var birthDate: String
     @State private var notes: String
+    @State private var additionalAddresses: [CustomerAddress]
+    @State private var customFields: [CustomerCustomField]
 
     init(customer: Customer) {
         self.customer = customer
@@ -320,6 +379,8 @@ struct EditCustomerView: View {
         self._address = State(initialValue: customer.address)
         self._birthDate = State(initialValue: customer.birthDate ?? "")
         self._notes = State(initialValue: customer.notes)
+        self._additionalAddresses = State(initialValue: customer.additionalAddresses ?? [])
+        self._customFields = State(initialValue: customer.customFields ?? [])
     }
 
     var body: some View {
@@ -330,6 +391,48 @@ struct EditCustomerView: View {
                 TextField("주소", text: $address, axis: .vertical)
                 TextField("생년월일", text: $birthDate)
                 TextField("메모", text: $notes, axis: .vertical)
+
+                Section("추가 주소") {
+                    ForEach($additionalAddresses) { $item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Picker("종류", selection: $item.kind) {
+                                ForEach(CustomerAddressKind.allCases, id: \.self) { kind in
+                                    Text(addressKindLabel(kind)).tag(kind)
+                                }
+                            }
+                            TextField("항목명", text: $item.label)
+                            TextField("주소 또는 지번", text: $item.value, axis: .vertical)
+                        }
+                    }
+                    .onDelete { offsets in
+                        additionalAddresses.remove(atOffsets: offsets)
+                    }
+                    Button {
+                        additionalAddresses.append(CustomerAddress(id: UUID().uuidString, label: "소유지", value: "", kind: .ownedProperty))
+                    } label: {
+                        Label("주소 항목 추가", systemImage: "plus")
+                    }
+                }
+
+                Section("사용자 정의 항목") {
+                    ForEach($customFields) { $field in
+                        VStack(alignment: .leading, spacing: 8) {
+                            TextField("항목명", text: $field.label)
+                            TextField("값", text: $field.value, axis: .vertical)
+                        }
+                    }
+                    .onDelete { offsets in
+                        customFields.remove(atOffsets: offsets)
+                    }
+                    Button {
+                        customFields.append(CustomerCustomField(id: UUID().uuidString, label: "새 항목", value: ""))
+                    } label: {
+                        Label("카드 항목 추가", systemImage: "plus")
+                    }
+                    Text("왼쪽으로 밀면 항목을 삭제할 수 있습니다. 입력한 항목은 고객 카드에도 표시됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("고객 수정")
             .toolbar {
@@ -338,11 +441,36 @@ struct EditCustomerView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("저장") {
-                        state.updateCustomer(customer, name: name, phoneNumber: phoneNumber, address: address, birthDate: birthDate, notes: notes)
+                        let savedAddresses = additionalAddresses.filter {
+                            !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                            !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        }
+                        let savedCustomFields = customFields.filter {
+                            !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                            !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        }
+                        state.updateCustomer(
+                            customer,
+                            name: name,
+                            phoneNumber: phoneNumber,
+                            address: address,
+                            birthDate: birthDate,
+                            notes: notes,
+                            additionalAddresses: savedAddresses,
+                            customFields: savedCustomFields
+                        )
                         dismiss()
                     }
                 }
             }
+        }
+    }
+
+    private func addressKindLabel(_ kind: CustomerAddressKind) -> String {
+        switch kind {
+        case .ownedProperty: return "소유지"
+        case .parcel: return "지번·필지"
+        case .other: return "기타 주소"
         }
     }
 }

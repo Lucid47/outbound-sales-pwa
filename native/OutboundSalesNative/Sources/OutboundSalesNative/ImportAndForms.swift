@@ -20,7 +20,11 @@ struct ImportView: View {
     홍길동,010-1234-5678,서울 강남구 테헤란로 152,방문 상담
     """
     #if os(iOS)
-    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var pendingOCRPhotos: [OCRPhotoSelection] = []
+    @State private var showingPhotoImportConfirmation = false
+    @State private var isPreparingPhotos = false
+    @State private var isRecognizingPhotos = false
     @State private var showingCamera = false
     @State private var showingContactPicker = false
     @State private var showingContactGroupPicker = false
@@ -92,7 +96,9 @@ struct ImportView: View {
                         .buttonStyle(.borderedProminent)
 
                         PhotosPicker(
-                            selection: $selectedPhotoItem,
+                            selection: $selectedPhotoItems,
+                            maxSelectionCount: 20,
+                            selectionBehavior: .ordered,
                             matching: .images,
                             photoLibrary: .shared()
                         ) {
@@ -108,9 +114,18 @@ struct ImportView: View {
                     }
                     #endif
 
-                    Text(state.ocrMessage)
+                    if isPreparingPhotos || isRecognizingPhotos {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(isPreparingPhotos ? "선택한 사진을 준비하는 중..." : state.ocrMessage)
+                        }
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text(state.ocrMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("CSV 텍스트 붙여넣기") {
@@ -161,9 +176,18 @@ struct ImportView: View {
                     .environmentObject(state)
             }
             #if os(iOS)
-            .onChange(of: selectedPhotoItem) { _, item in
-                guard let item else { return }
-                Task { await recognizePhotoItem(item) }
+            .onChange(of: selectedPhotoItems) { _, items in
+                guard !items.isEmpty else { return }
+                Task { await preparePhotoItems(items) }
+            }
+            .sheet(isPresented: $showingPhotoImportConfirmation) {
+                OCRPhotoImportConfirmationSheet(photos: pendingOCRPhotos) {
+                    showingPhotoImportConfirmation = false
+                    let photos = pendingOCRPhotos
+                    Task { await recognizePhotos(photos, sourceTitle: "사진앱") }
+                } onCancel: {
+                    clearPendingPhotos()
+                }
             }
             .sheet(isPresented: $showingContactPicker) {
                 ContactPickerSheet { contacts in
@@ -180,7 +204,7 @@ struct ImportView: View {
             }
             .sheet(isPresented: $showingCamera) {
                 CameraCaptureView { url in
-                    Task { await recognizeImage(at: url, sourceTitle: "카메라 촬영") }
+                    prepareCameraPhoto(url)
                 }
             }
             #else
@@ -254,17 +278,67 @@ struct ImportView: View {
     }
 
     #if os(iOS)
-    private func recognizePhotoItem(_ item: PhotosPickerItem) async {
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                state.ocrMessage = "사진을 읽지 못했습니다."
-                return
-            }
-            let url = try writeTemporaryImage(data: data, extension: "image")
-            await recognizeImage(at: url, sourceTitle: "사진앱")
-        } catch {
-            state.ocrMessage = "사진을 읽지 못했습니다."
+    private func preparePhotoItems(_ items: [PhotosPickerItem]) async {
+        isPreparingPhotos = true
+        defer {
+            isPreparingPhotos = false
+            selectedPhotoItems = []
         }
+        var prepared: [OCRPhotoSelection] = []
+        for (index, item) in items.enumerated() {
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let url = try writeTemporaryImage(data: data, extension: "image")
+                prepared.append(OCRPhotoSelection(order: index, url: url, previewData: data))
+            } catch {
+                continue
+            }
+        }
+        guard !prepared.isEmpty else {
+            state.ocrMessage = "선택한 사진을 읽지 못했습니다."
+            return
+        }
+        pendingOCRPhotos = prepared
+        showingPhotoImportConfirmation = true
+    }
+
+    private func prepareCameraPhoto(_ url: URL) {
+        do {
+            let data = try Data(contentsOf: url)
+            pendingOCRPhotos = [OCRPhotoSelection(order: 0, url: url, previewData: data)]
+            showingPhotoImportConfirmation = true
+        } catch {
+            state.ocrMessage = "촬영한 사진을 읽지 못했습니다."
+        }
+    }
+
+    private func recognizePhotos(_ photos: [OCRPhotoSelection], sourceTitle: String) async {
+        guard !photos.isEmpty else { return }
+        isRecognizingPhotos = true
+        var csvDocuments: [String] = []
+        for (index, photo) in photos.sorted(by: { $0.order < $1.order }).enumerated() {
+            state.ocrMessage = "사진 OCR 처리 중: \(index + 1)/\(photos.count)"
+            if let csv = await state.recognizeOCRCSV(url: photo.url, headers: []) {
+                csvDocuments.append(csv)
+            }
+        }
+        isRecognizingPhotos = false
+        defer { clearPendingPhotos() }
+        guard let mergedCSV = mergeOCRCSVDocuments(csvDocuments) else {
+            state.ocrMessage = "선택한 사진에서 표 데이터를 만들지 못했습니다."
+            return
+        }
+        state.ocrMessage = "OCR 완료: \(csvDocuments.count)/\(photos.count)장 인식"
+        presentMappingPopup(text: mergedCSV, sourceFileName: "ocr-images.csv", sourceTitle: sourceTitle)
+    }
+
+    private func clearPendingPhotos() {
+        for photo in pendingOCRPhotos {
+            try? FileManager.default.removeItem(at: photo.url)
+        }
+        pendingOCRPhotos = []
+        selectedPhotoItems = []
+        showingPhotoImportConfirmation = false
     }
 
     private func writeTemporaryImage(data: Data, extension pathExtension: String) throws -> URL {
@@ -275,6 +349,112 @@ struct ImportView: View {
         return url
     }
     #endif
+}
+
+#if os(iOS)
+private struct OCRPhotoSelection: Identifiable {
+    let id = UUID()
+    let order: Int
+    let url: URL
+    let previewData: Data
+}
+
+private struct OCRPhotoImportConfirmationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let photos: [OCRPhotoSelection]
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("선택한 \(photos.count)장의 사진을 순서대로 읽어 하나의 고객리스트로 합칩니다.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(photos.sorted(by: { $0.order < $1.order })) { photo in
+                            VStack(spacing: 6) {
+                                if let image = UIImage(data: photo.previewData) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 112, height: 144)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "photo")
+                                        .frame(width: 112, height: 144)
+                                        .background(.quaternary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                Text("\(photo.order + 1)번째")
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                    }
+                }
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("사진 가져오기 확인")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("취소") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("OCR 시작") {
+                        onConfirm()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
+private func mergeOCRCSVDocuments(_ documents: [String]) -> String? {
+    let parsedDocuments = documents.compactMap { try? parseCSV($0, firstRowIsHeader: true) }
+    guard let reference = parsedDocuments.max(by: { $0.headers.count < $1.headers.count }) else { return nil }
+    let headers = reference.headers
+    let normalizedHeaders = headers.map(normalizeHeader)
+    var rows: [[String]] = []
+
+    for parsed in parsedDocuments {
+        var pageRows: [[String]] = []
+        for sourceRow in parsed.rows {
+            let row = (0..<headers.count).map { index in index < sourceRow.count ? sourceRow[index] : "" }
+            let normalized = row.map(normalizeHeader)
+            let isRepeatedHeader = zip(normalized, normalizedHeaders)
+                .filter { !$0.0.isEmpty && $0.0 == $0.1 }
+                .count >= max(2, headers.count / 2)
+            guard !isRepeatedHeader, normalized.contains(where: { !$0.isEmpty }) else { continue }
+            pageRows.append(row)
+        }
+
+        let maximumOverlap = min(12, rows.count, pageRows.count)
+        var overlapCount = 0
+        if maximumOverlap > 0 {
+            for candidate in stride(from: maximumOverlap, through: 1, by: -1) {
+                let previous = rows.suffix(candidate).map(ocrRowFingerprint)
+                let current = pageRows.prefix(candidate).map(ocrRowFingerprint)
+                if previous == current {
+                    overlapCount = candidate
+                    break
+                }
+            }
+        }
+        rows.append(contentsOf: pageRows.dropFirst(overlapCount))
+    }
+    return makeCSV(rows: [headers] + rows)
+}
+
+private func ocrRowFingerprint(_ row: [String]) -> String {
+    row.map(normalizeHeader).joined(separator: "|")
 }
 
 private struct ImportSourceButtonLabel: View {
@@ -316,13 +496,16 @@ struct ImportMappingSheet: View {
     @State private var listName: String
     @State private var firstRowIsHeader = true
     @State private var parsed: ParsedCSV?
+    @State private var selectedRowIndices: Set<Int>
     @State private var message = ""
     @State private var didPrepareDestination = false
 
     init(draft: ImportDraft) {
         self.draft = draft
+        let initialParsed = try? parseCSV(draft.rawText, firstRowIsHeader: true)
         self._listName = State(initialValue: draft.defaultListName)
-        self._parsed = State(initialValue: try? parseCSV(draft.rawText, firstRowIsHeader: true))
+        self._parsed = State(initialValue: initialParsed)
+        self._selectedRowIndices = State(initialValue: Set(initialParsed?.rows.indices ?? 0..<0))
     }
 
     var body: some View {
@@ -377,18 +560,57 @@ struct ImportMappingSheet: View {
                     Text("헤더 이름이 인식되면 먼저 자동 매핑합니다. 필요하면 여기서 직접 바꾸세요.")
                 }
 
-                if let parsed, let firstRow = parsed.rows.first {
-                    Section("첫 데이터 미리보기") {
-                        ForEach(parsed.headers.indices, id: \.self) { index in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(index + 1). \(parsed.headers[index])")
-                                    .font(.caption.weight(.semibold))
-                                Text(index < firstRow.count ? firstRow[index] : "")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
+                if let parsed {
+                    Section {
+                        HStack {
+                            Button("정상 신규만") { selectRecommendedRows() }
+                            Spacer()
+                            Button("전체 선택") { selectedRowIndices = Set(parsed.rows.indices) }
+                            Button("전체 해제") { selectedRowIndices = [] }
                         }
+                        .font(.subheadline.weight(.semibold))
+
+                        LabeledContent("선택", value: "\(selectedRowIndices.count)/\(parsed.rows.count)명")
+
+                        ForEach(parsed.rows.indices, id: \.self) { index in
+                            Button {
+                                if selectedRowIndices.contains(index) {
+                                    selectedRowIndices.remove(index)
+                                } else {
+                                    selectedRowIndices.insert(index)
+                                }
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: selectedRowIndices.contains(index) ? "checkmark.square.fill" : "square")
+                                        .foregroundStyle(selectedRowIndices.contains(index) ? Color.accentColor : Color.secondary)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(rowTitle(parsed.rows[index], parsed: parsed, index: index))
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                        Text(rowSubtitle(parsed.rows[index], parsed: parsed))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer()
+                                    if !rowIsValid(parsed.rows[index], parsed: parsed) {
+                                        Text("확인 필요")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.orange)
+                                    } else if rowIsDuplicate(parsed.rows[index], parsed: parsed, index: index) {
+                                        Text("중복")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } header: {
+                        Text("가져올 고객 선택")
+                    } footer: {
+                        Text("정상 신규 고객만 기본 선택합니다. 중복 또는 확인이 필요한 행도 직접 선택하면 가져올 수 있습니다.")
                     }
                 }
 
@@ -411,6 +633,7 @@ struct ImportMappingSheet: View {
             }
             .onAppear {
                 prepareDefaultDestination()
+                selectRecommendedRows()
             }
             .onChange(of: firstRowIsHeader) { _, _ in
                 reloadParsed()
@@ -418,11 +641,17 @@ struct ImportMappingSheet: View {
             .onChange(of: state.customerLists) { _, _ in
                 ensureSelectedListIsValid()
             }
+            .onChange(of: destinationMode) { _, _ in
+                selectRecommendedRows()
+            }
+            .onChange(of: selectedListId) { _, _ in
+                selectRecommendedRows()
+            }
         }
     }
 
     private var canSave: Bool {
-        guard parsed != nil else { return false }
+        guard parsed != nil, !selectedRowIndices.isEmpty else { return false }
         switch destinationMode {
         case .existingList:
             return state.customerLists.contains { $0.id == selectedListId }
@@ -453,6 +682,8 @@ struct ImportMappingSheet: View {
     private func reloadParsed() {
         do {
             parsed = try parseCSV(draft.rawText, firstRowIsHeader: firstRowIsHeader)
+            selectedRowIndices = Set(parsed?.rows.indices ?? 0..<0)
+            selectRecommendedRows()
             message = ""
         } catch {
             parsed = nil
@@ -469,12 +700,13 @@ struct ImportMappingSheet: View {
                 guard var next = parsed else { return }
                 next.mapping[field] = value < 0 ? nil : value
                 parsed = next
+                selectRecommendedRows()
             }
         )
     }
 
     private func save() {
-        guard let parsed else {
+        guard var parsed else {
             message = "먼저 데이터를 분석하세요."
             return
         }
@@ -482,8 +714,15 @@ struct ImportMappingSheet: View {
             message = "고객명으로 사용할 열을 선택하세요."
             return
         }
-        guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil else {
-            message = "연락처 또는 주소 열 중 하나는 필요합니다."
+        guard parsed.mapping[.phoneNumber] != nil || parsed.mapping[.address] != nil || parsed.mapping[.ownedAddress] != nil || parsed.mapping[.parcelAddress] != nil else {
+            message = "연락처 또는 주소 관련 열 중 하나는 필요합니다."
+            return
+        }
+        parsed.rows = parsed.rows.indices
+            .filter(selectedRowIndices.contains)
+            .map { parsed.rows[$0] }
+        guard !parsed.rows.isEmpty else {
+            message = "가져올 고객을 한 명 이상 선택하세요."
             return
         }
         switch destinationMode {
@@ -502,6 +741,69 @@ struct ImportMappingSheet: View {
             state.importParsedCSV(parsed, listName: trimmedListName, sourceFileName: draft.sourceFileName)
         }
         dismiss()
+    }
+
+    private func selectRecommendedRows() {
+        guard let parsed else { return }
+        selectedRowIndices = Set(parsed.rows.indices.filter { index in
+            rowIsValid(parsed.rows[index], parsed: parsed) && !rowIsDuplicate(parsed.rows[index], parsed: parsed, index: index)
+        })
+    }
+
+    private func mappedValue(_ field: FieldKey, row: [String], parsed: ParsedCSV) -> String {
+        guard let index = parsed.mapping[field], index < row.count else { return "" }
+        return row[index].trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func rowIsValid(_ row: [String], parsed: ParsedCSV) -> Bool {
+        let name = mappedValue(.name, row: row, parsed: parsed)
+        let contactValues = [
+            mappedValue(.phoneNumber, row: row, parsed: parsed),
+            mappedValue(.address, row: row, parsed: parsed),
+            mappedValue(.ownedAddress, row: row, parsed: parsed),
+            mappedValue(.parcelAddress, row: row, parsed: parsed)
+        ]
+        return !name.isEmpty && contactValues.contains { !$0.isEmpty }
+    }
+
+    private func rowIsDuplicate(_ row: [String], parsed: ParsedCSV, index: Int) -> Bool {
+        let phone = normalizedPhone(mappedValue(.phoneNumber, row: row, parsed: parsed))
+        let name = normalizeHeader(mappedValue(.name, row: row, parsed: parsed))
+        let address = normalizeHeader(mappedValue(.address, row: row, parsed: parsed))
+        if !phone.isEmpty {
+            if destinationCustomers.contains(where: { normalizedPhone($0.phoneNumber) == phone }) { return true }
+            return parsed.rows.indices.contains { previousIndex in
+                previousIndex < index && normalizedPhone(mappedValue(.phoneNumber, row: parsed.rows[previousIndex], parsed: parsed)) == phone
+            }
+        }
+        guard !name.isEmpty, !address.isEmpty else { return false }
+        return destinationCustomers.contains { customer in
+            normalizeHeader(customer.name) == name && normalizeHeader(customer.address) == address
+        }
+    }
+
+    private var destinationCustomers: [Customer] {
+        guard destinationMode == .existingList else { return [] }
+        return state.customers.filter { $0.customerListId == selectedListId }
+    }
+
+    private func normalizedPhone(_ value: String) -> String {
+        value.filter(\.isNumber)
+    }
+
+    private func rowTitle(_ row: [String], parsed: ParsedCSV, index: Int) -> String {
+        let name = mappedValue(.name, row: row, parsed: parsed)
+        return name.isEmpty ? "\(index + 1)행 · 이름 확인 필요" : "\(index + 1)행 · \(name)"
+    }
+
+    private func rowSubtitle(_ row: [String], parsed: ParsedCSV) -> String {
+        let values = [
+            mappedValue(.phoneNumber, row: row, parsed: parsed),
+            mappedValue(.address, row: row, parsed: parsed),
+            mappedValue(.ownedAddress, row: row, parsed: parsed),
+            mappedValue(.parcelAddress, row: row, parsed: parsed)
+        ].filter { !$0.isEmpty }
+        return values.isEmpty ? "연락처 또는 주소 없음" : values.joined(separator: " · ")
     }
 }
 
@@ -523,7 +825,11 @@ private func fieldLabel(_ field: FieldKey) -> String {
     case .phoneNumber:
         return "연락처"
     case .address:
-        return "주소"
+        return "대표 주소"
+    case .ownedAddress:
+        return "소유지 주소"
+    case .parcelAddress:
+        return "지번·필지"
     case .birthDate:
         return "생년월일"
     case .notes:

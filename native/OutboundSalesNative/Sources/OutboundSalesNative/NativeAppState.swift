@@ -32,6 +32,13 @@ public struct CustomerListDeletionImpact: Equatable {
     }
 }
 
+public struct CustomerDeletionImpact: Equatable {
+    public var visitLogCount: Int
+    public var contactLogCount: Int
+    public var photoLogCount: Int
+    public var scheduleItemCount: Int
+}
+
 public struct CustomerActivitySummary: Equatable {
     public var totalCount: Int
     public var callCount: Int
@@ -112,6 +119,8 @@ public final class NativeAppState: ObservableObject {
                 self.selectedListId = snapshot.selectedListId.flatMap { selectedId in
                     activeLists.contains { $0.id == selectedId } ? selectedId : nil
                 } ?? activeLists.first?.id
+                self.applyDeletionTombstonesToLoadedData()
+                self.resolveSelectedList()
                 self.storageMessage = "저장된 데이터를 불러왔습니다."
                 self.customers = Self.repairingDashboardAssignments(
                     self.customers,
@@ -189,7 +198,9 @@ public final class NativeAppState: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return scoped }
         return scoped.filter { customer in
-            [customer.name, customer.phoneNumber, customer.address]
+            let additionalValues = (customer.additionalAddresses ?? []).flatMap { [$0.label, $0.value] }
+            let customValues = (customer.customFields ?? []).flatMap { [$0.label, $0.value] }
+            return ([customer.name, customer.phoneNumber, customer.address, customer.notes] + additionalValues + customValues)
                 .contains { $0.localizedCaseInsensitiveContains(query) }
         }
     }
@@ -257,6 +268,15 @@ public final class NativeAppState: ObservableObject {
                     recipient.customerId.map(customerIds.contains) ?? false
                 }
             }
+        )
+    }
+
+    public func deletionImpact(forCustomerId customerId: String) -> CustomerDeletionImpact {
+        CustomerDeletionImpact(
+            visitLogCount: visitLogs.count { $0.customerId == customerId },
+            contactLogCount: contactLogs.count { $0.customerId == customerId },
+            photoLogCount: photoLogs.count { $0.customerId == customerId },
+            scheduleItemCount: visitScheduleItems.count { $0.customerId == customerId }
         )
     }
 
@@ -812,7 +832,16 @@ public final class NativeAppState: ObservableObject {
         }
     }
 
-    public func updateCustomer(_ customer: Customer, name: String, phoneNumber: String, address: String, birthDate: String, notes: String) {
+    public func updateCustomer(
+        _ customer: Customer,
+        name: String,
+        phoneNumber: String,
+        address: String,
+        birthDate: String,
+        notes: String,
+        additionalAddresses: [CustomerAddress]? = nil,
+        customFields: [CustomerCustomField]? = nil
+    ) {
         guard let index = customers.firstIndex(where: { $0.id == customer.id }) else { return }
         let resolvedBirthDate = birthDate.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         var changedFields: [String] = []
@@ -821,6 +850,10 @@ public final class NativeAppState: ObservableObject {
         if customers[index].address != address { changedFields.append("주소") }
         if customers[index].birthDate != resolvedBirthDate { changedFields.append("생년월일") }
         if customers[index].notes != notes { changedFields.append("메모") }
+        let resolvedAdditionalAddresses = additionalAddresses ?? customers[index].additionalAddresses ?? []
+        let resolvedCustomFields = customFields ?? customers[index].customFields ?? []
+        if (customers[index].additionalAddresses ?? []) != resolvedAdditionalAddresses { changedFields.append("추가 주소") }
+        if (customers[index].customFields ?? []) != resolvedCustomFields { changedFields.append("사용자 항목") }
         guard !changedFields.isEmpty else { return }
         let now = Date()
         customers[index].name = name
@@ -828,6 +861,8 @@ public final class NativeAppState: ObservableObject {
         customers[index].address = address
         customers[index].birthDate = resolvedBirthDate
         customers[index].notes = notes
+        customers[index].additionalAddresses = resolvedAdditionalAddresses.isEmpty ? nil : resolvedAdditionalAddresses
+        customers[index].customFields = resolvedCustomFields.isEmpty ? nil : resolvedCustomFields
         customers[index].region = extractRegion(address)
         if customer.address != address {
             customers[index].latitude = nil
@@ -849,6 +884,60 @@ public final class NativeAppState: ObservableObject {
         Task {
             await geocodeCustomerIfNeeded(id: customer.id)
         }
+    }
+
+    public func permanentlyDeleteCustomer(id: String) {
+        guard let customer = customers.first(where: { $0.id == id }) else { return }
+        let now = Date()
+        let removedPhotoLogs = photoLogs.filter { $0.customerId == id }
+        let removedVisitLogs = visitLogs.filter { $0.customerId == id }
+
+        for log in removedPhotoLogs {
+            try? fileStore.deleteAssetIfPresent(fileName: log.fileName)
+            try? fileStore.deleteAssetIfPresent(fileName: log.thumbnailFileName)
+        }
+        for log in removedVisitLogs {
+            if let fileName = log.mapSnapshotFileName { try? fileStore.deleteAssetIfPresent(fileName: fileName) }
+            if let fileName = log.audioFileName { try? fileStore.deleteAssetIfPresent(fileName: fileName) }
+        }
+
+        customers.removeAll { $0.id == id }
+        visitLogs.removeAll { $0.customerId == id }
+        contactLogs.removeAll { $0.customerId == id }
+        photoLogs.removeAll { $0.customerId == id }
+        visitScheduleItems.removeAll { $0.customerId == id }
+        stageChangeLogs.removeAll { $0.customerId == id }
+        activityEvents.removeAll { $0.customerId == id }
+        for index in managementPeriods.indices {
+            managementPeriods[index].customerIds.removeAll { $0 == id }
+            managementPeriods[index].updatedAt = now
+        }
+        for campaignIndex in groupSmsCampaigns.indices {
+            var changed = false
+            for recipientIndex in groupSmsCampaigns[campaignIndex].recipients.indices where groupSmsCampaigns[campaignIndex].recipients[recipientIndex].customerId == id {
+                groupSmsCampaigns[campaignIndex].recipients[recipientIndex].customerId = nil
+                changed = true
+            }
+            if changed { groupSmsCampaigns[campaignIndex].updatedAt = now }
+        }
+        for batchIndex in contactExportBatches.indices {
+            let previousCount = contactExportBatches[batchIndex].records.count
+            contactExportBatches[batchIndex].records.removeAll { $0.customerId == id }
+            if contactExportBatches[batchIndex].records.count != previousCount {
+                contactExportBatches[batchIndex].updatedAt = now
+            }
+        }
+        deletionTombstones.removeAll { $0.kind == .customer && $0.recordId == id }
+        deletionTombstones.append(DeletedRecordTombstone(kind: .customer, recordId: id, deletedAt: now))
+        recordActivity(
+            kind: .customerUpdated,
+            occurredAt: now,
+            customerListId: customer.customerListId,
+            title: "고객 영구삭제",
+            detail: customer.name
+        )
+        actionMessage = "\(customer.name.isEmpty ? "고객" : customer.name)을 영구삭제했습니다. iPhone 연락처는 삭제하지 않았습니다."
+        persist()
     }
 
     public func toggleDone(_ customer: Customer) {
@@ -1661,6 +1750,8 @@ public final class NativeAppState: ObservableObject {
         selectedListId = snapshot.selectedListId.flatMap { selectedId in
             customerLists.contains { $0.id == selectedId } ? selectedId : nil
         } ?? customerLists.first?.id
+        applyDeletionTombstonesToLoadedData()
+        resolveSelectedList()
     }
 
     private func restore(backup: NativeFullBackup, selectedListIds: Set<String>?) {
@@ -1734,6 +1825,8 @@ public final class NativeAppState: ObservableObject {
         dashboardSettings.statusCount = dashboardStatuses.count
         customers = Self.repairingDashboardAssignments(customers, statuses: dashboardStatuses)
         selectedListId = restoredLists.first?.id ?? selectedListId ?? customerLists.first?.id
+        applyDeletionTombstonesToLoadedData()
+        resolveSelectedList()
 
         let restoredVisitLogs = remoteSnapshot.visitLogs.filter { selectedListIds.contains($0.customerListId) && restoredCustomerIds.contains($0.customerId) }
         let photoFileNames = Set(restoredPhotoLogs.flatMap { [$0.fileName, $0.thumbnailFileName] })
@@ -1936,6 +2029,43 @@ public final class NativeAppState: ObservableObject {
             return
         }
         selectedListId = customerLists.first { $0.id != excludedId }?.id
+    }
+
+    private func applyDeletionTombstonesToLoadedData() {
+        let deletedListIds = Set(deletionTombstones.filter { $0.kind == .customerList }.map(\.recordId))
+        let deletedCustomerIds = Set(deletionTombstones.filter { $0.kind == .customer }.map(\.recordId))
+        let customerIdsFromDeletedLists = Set(customers.filter { deletedListIds.contains($0.customerListId) }.map(\.id))
+        let allDeletedCustomerIds = deletedCustomerIds.union(customerIdsFromDeletedLists)
+
+        storedCustomerLists.removeAll { deletedListIds.contains($0.id) }
+        customers.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.id) }
+        visitLogs.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.customerId) }
+        contactLogs.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.customerId) }
+        photoLogs.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.customerId) }
+        visitSchedules.removeAll { deletedListIds.contains($0.customerListId) }
+        visitScheduleItems.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.customerId) }
+        stageChangeLogs.removeAll { deletedListIds.contains($0.customerListId) || allDeletedCustomerIds.contains($0.customerId) }
+        activityEvents.removeAll { event in
+            event.customerListId.map(deletedListIds.contains) ?? false ||
+            event.customerId.map(allDeletedCustomerIds.contains) ?? false
+        }
+        contactExportBatches.removeAll { deletedListIds.contains($0.customerListId) }
+        for batchIndex in contactExportBatches.indices {
+            contactExportBatches[batchIndex].records.removeAll { allDeletedCustomerIds.contains($0.customerId) }
+        }
+        for campaignIndex in groupSmsCampaigns.indices {
+            if let listId = groupSmsCampaigns[campaignIndex].customerListId, deletedListIds.contains(listId) {
+                groupSmsCampaigns[campaignIndex].customerListId = nil
+            }
+            for recipientIndex in groupSmsCampaigns[campaignIndex].recipients.indices where groupSmsCampaigns[campaignIndex].recipients[recipientIndex].customerId.map(allDeletedCustomerIds.contains) ?? false {
+                groupSmsCampaigns[campaignIndex].recipients[recipientIndex].customerId = nil
+            }
+        }
+        for periodIndex in managementPeriods.indices {
+            managementPeriods[periodIndex].customerListIds.removeAll { deletedListIds.contains($0) }
+            managementPeriods[periodIndex].customerIds.removeAll { allDeletedCustomerIds.contains($0) }
+        }
+        managementPeriods.removeAll { $0.customerListIds.isEmpty }
     }
 
     private func recordActivity(
@@ -2305,11 +2435,12 @@ public final class NativeAppState: ObservableObject {
     private func mergeBackups(_ remote: NativeFullBackup, _ local: NativeFullBackup) -> NativeFullBackup {
         let mergedTombstones = mergeById(remote.snapshot.deletionTombstones, local.snapshot.deletionTombstones) { $0.deletedAt < $1.deletedAt }
         let deletedListIds = Set(mergedTombstones.filter { $0.kind == .customerList }.map(\.recordId))
+        let deletedCustomerIds = Set(mergedTombstones.filter { $0.kind == .customer }.map(\.recordId))
         let mergedLists = mergeById(remote.snapshot.customerLists, local.snapshot.customerLists) { $0.updatedAt < $1.updatedAt }
             .filter { !deletedListIds.contains($0.id) }
         let validListIds = Set(mergedLists.map(\.id))
         let mergedCustomers = mergeById(remote.snapshot.customers, local.snapshot.customers) { $0.updatedAt < $1.updatedAt }
-            .filter { validListIds.contains($0.customerListId) }
+            .filter { validListIds.contains($0.customerListId) && !deletedCustomerIds.contains($0.id) }
         let validCustomerIds = Set(mergedCustomers.map(\.id))
         let mergedVisitLogs = mergeById(remote.snapshot.visitLogs, local.snapshot.visitLogs) { $0.createdAt < $1.createdAt }
             .filter { validListIds.contains($0.customerListId) && validCustomerIds.contains($0.customerId) }

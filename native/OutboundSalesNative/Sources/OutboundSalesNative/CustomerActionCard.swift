@@ -41,6 +41,20 @@ struct CustomerActionCard: View {
                             .font(.subheadline)
                             .foregroundStyle(AppPalette.textSecondary)
                             .lineLimit(compact ? 1 : 2)
+                        if !compact, let extraAddress = customer.additionalAddresses?.first {
+                            Text("\(extraAddress.label): \(extraAddress.value)")
+                                .font(.caption)
+                                .foregroundStyle(AppPalette.textSecondary)
+                                .lineLimit(1)
+                        }
+                        if !compact {
+                            ForEach(Array((customer.customFields ?? []).prefix(2))) { field in
+                                Text("\(field.label): \(field.value)")
+                                    .font(.caption)
+                                    .foregroundStyle(AppPalette.textSecondary)
+                                    .lineLimit(1)
+                            }
+                        }
                         if !compact, let latest = state.logs(for: customer).first {
                             Text("최근: \(latest.1)")
                                 .font(.caption)

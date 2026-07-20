@@ -14,6 +14,48 @@ final class OutboundSalesCoreTests: XCTestCase {
         XCTAssertEqual(parsed.mapping[.notes], 3)
     }
 
+    func testDetectsRealEstateAddressHeadersAndPreservesBothValues() throws {
+        let parsed = try parseCSV("""
+        성명,연락처,주소,소유지,소유지번
+        홍길동,010-1234-5678,서울 강남구 테헤란로 1,경기 하남시 미사대로 2,하남시 망월동 123-4
+        """)
+
+        XCTAssertEqual(parsed.mapping[.address], 2)
+        XCTAssertEqual(parsed.mapping[.ownedAddress], 3)
+        XCTAssertEqual(parsed.mapping[.parcelAddress], 4)
+
+        var nextId = 0
+        let customer = try XCTUnwrap(customersFromCSV(parsed, customerListId: "list-1", idGenerator: {
+            nextId += 1
+            return "id-\(nextId)"
+        }).first)
+        XCTAssertEqual(customer.address, "서울 강남구 테헤란로 1")
+        XCTAssertEqual(customer.additionalAddresses?.map(\.label), ["소유지", "지번"])
+        XCTAssertEqual(customer.additionalAddresses?.map(\.value), ["경기 하남시 미사대로 2", "하남시 망월동 123-4"])
+    }
+
+    func testDecodesCustomerCreatedBeforeAdditionalFields() throws {
+        let json = """
+        {
+          "id":"customer-1",
+          "customerListId":"list-1",
+          "name":"기존 고객",
+          "phoneNumber":"01012345678",
+          "address":"서울",
+          "notes":"",
+          "status":"open",
+          "createdAt":"2026-01-01T00:00:00Z",
+          "updatedAt":"2026-01-01T00:00:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let customer = try decoder.decode(Customer.self, from: Data(json.utf8))
+
+        XCTAssertNil(customer.additionalAddresses)
+        XCTAssertNil(customer.customFields)
+    }
+
     func testParsesHeaderlessCsvForManualMapping() throws {
         let parsed = try parseCSV("""
         홍길동,010-1234-5678,서울 강남구 테헤란로 152
