@@ -1982,7 +1982,7 @@ function App() {
             <img src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" />
             <div>
               <h2>홈화면에 추가</h2>
-              <span>영업도우미</span>
+              <span>소희야 가자</span>
             </div>
           </div>
           <p>{isIos ? 'Safari 공유 버튼을 누른 뒤 홈 화면에 추가를 선택하세요.' : '설치하면 브라우저 주소창 없이 앱처럼 실행됩니다.'}</p>
@@ -2313,7 +2313,7 @@ function App() {
           <div className="install-inline">
             <img src={`${import.meta.env.BASE_URL}apple-touch-icon.png`} alt="" />
             <div>
-              <strong>영업도우미</strong>
+              <strong>소희야 가자</strong>
               <span>{isStandalone ? '현재 홈화면 앱 모드로 실행 중입니다.' : '홈화면에 추가하면 앱처럼 사용할 수 있습니다.'}</span>
             </div>
           </div>

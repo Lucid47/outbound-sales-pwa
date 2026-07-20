@@ -25,7 +25,16 @@ dist-ssr
 *.sw?
 
 # OCR local tool outputs and private samples
+/ocr-output/
 tools/customer-list-ocr-cli/.build/
 tools/customer-list-ocr-cli/ocr-output/
 tools/customer-list-ocr-cli/test-data/private/
 tools/customer-list-ocr-cli/test-data/customer/
+
+# Native app local build output
+native/**/.build/
+native/**/DerivedData/
+native/.google-drive-oauth.local
+
+# Group SMS private device-test evidence
+docs/test-results/private/
